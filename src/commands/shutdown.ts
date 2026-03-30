@@ -36,10 +36,11 @@ export const shutdownCommand = new Command("shutdown")
     if (!project) {
       // Close all captain + command workspaces
       const workspaces = cmuxWorkspaces();
+      const captainNames = Object.values(config.projects).map((p) => p.captainName);
       const cockpitWorkspaces = workspaces.filter(
         (w) =>
           w === (config.commandName || "command") ||
-          w.startsWith("captain-"),
+          captainNames.includes(w),
       );
 
       if (cockpitWorkspaces.length === 0) {
@@ -69,7 +70,7 @@ export const shutdownCommand = new Command("shutdown")
         process.exit(1);
       }
 
-      const workspaceName = `captain-${project}`;
+      const workspaceName = config.projects[project].captainName;
       console.log(chalk.bold(`\nShutting down captain workspace for '${project}'...\n`));
 
       const workspaces = cmuxWorkspaces();

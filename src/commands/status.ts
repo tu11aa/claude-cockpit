@@ -78,10 +78,12 @@ export const statusCommand = new Command("status")
         continue;
       }
 
-      const captainStatus =
+      const sessionIndicator =
         fm.captain_session === "active"
-          ? chalk.green("active")
-          : chalk.dim("inactive");
+          ? chalk.green("●")
+          : chalk.dim("○");
+      // Pad the plain name first, then append the colored indicator so chalk escapes don't break alignment
+      const captainDisplay = `${project.captainName.padEnd(11)} ${sessionIndicator}`;
 
       const crew = String(fm.active_crew ?? 0).padEnd(6);
       const progress = progressBar(
@@ -91,7 +93,7 @@ export const statusCommand = new Command("status")
       const updated = timeAgo(fm.last_updated);
 
       console.log(
-        `  ${name.padEnd(18)} ${captainStatus.padEnd(12 + (fm.captain_session === "active" ? 10 : 7))} ${crew} ${progress} ${updated}`,
+        `  ${name.padEnd(18)} ${captainDisplay}  ${crew} ${progress} ${updated}`,
       );
     }
 

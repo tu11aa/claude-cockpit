@@ -62,7 +62,7 @@ export const launchCommand = new Command("launch")
       }
 
       const proj = config.projects[project];
-      const workspaceName = `captain-${project}`;
+      const workspaceName = proj.captainName;
       console.log(
         chalk.bold(
           `\nLaunching captain workspace for '${project}' (${proj.captainName})\n`,

@@ -86,11 +86,11 @@ export const doctorCommand = new Command("doctor")
         settingsHaveAgentTeams(),
       ),
     );
-    results.push(check("Plugin: superpowers", pluginInstalled("superpowers")));
+    results.push(check("Plugin: superpowers", pluginInstalled("superpowers@claude-plugins-official")));
     results.push(
-      check("Plugin: claude-mem", pluginInstalled("claude-mem")),
+      check("Plugin: claude-mem", pluginInstalled("claude-mem@thedotmack")),
     );
-    results.push(check("Plugin: context7", pluginInstalled("context7")));
+    results.push(check("Plugin: context7", pluginInstalled("context7@claude-plugins-official")));
 
     const config = loadConfig();
     results.push(
