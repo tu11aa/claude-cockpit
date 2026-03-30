@@ -1,0 +1,28 @@
+{
+  "name": "claude-cockpit",
+  "version": "0.1.0",
+  "description": "Multi-project agent orchestration for Claude Code",
+  "type": "module",
+  "bin": {
+    "cockpit": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": ["claude-code", "agent", "orchestration", "cmux", "obsidian"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^13.0.0",
+    "chalk": "^5.4.0",
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
