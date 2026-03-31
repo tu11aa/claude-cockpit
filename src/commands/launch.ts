@@ -1,7 +1,9 @@
 import { Command } from "commander";
 import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import chalk from "chalk";
-import { loadConfig } from "../config.js";
+import { loadConfig, resolveHome } from "../config.js";
 
 function workspaceExists(name: string): boolean {
   try {
@@ -16,20 +18,32 @@ function workspaceExists(name: string): boolean {
   }
 }
 
-function launchWorkspace(name: string, cwd?: string): void {
+function findPackageRoot(): string {
+  let dir = path.dirname(new URL(import.meta.url).pathname);
+  while (dir !== "/") {
+    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+    dir = path.dirname(dir);
+  }
+  return process.cwd();
+}
+
+function installClaudeMd(templateName: string, destDir: string): void {
+  const pkgRoot = findPackageRoot();
+  const src = path.join(pkgRoot, "orchestrator", templateName);
+  const dest = path.join(destDir, "CLAUDE.md");
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, dest);
+  }
+}
+
+function launchWorkspace(name: string, cwd?: string, navigate = false): void {
   if (workspaceExists(name)) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
     execSync(`cmux select-workspace --workspace "${name}"`, { stdio: "inherit" });
   } else {
-    // Save current workspace to return focus
-    let current: string | undefined;
-    try {
-      current = execSync("cmux current-workspace", { encoding: "utf-8" }).trim().split(/\s+/)[0];
-    } catch { /* ignore */ }
-
     // Create new workspace with claude session
-    const cmdFlag = cwd ? `--command "claude" --cwd "${cwd}"` : `--command "claude"`;
-    const output = execSync(`cmux new-workspace ${cmdFlag}`, { encoding: "utf-8" }).trim();
+    const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
+    const output = execSync(`cmux new-workspace --command "claude"${cwdFlag}`, { encoding: "utf-8" }).trim();
     const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
 
     // Rename to the desired name
@@ -37,9 +51,9 @@ function launchWorkspace(name: string, cwd?: string): void {
       execSync(`cmux rename-workspace --workspace "${wsId}" "${name}"`, { stdio: "inherit" });
     }
 
-    // Return focus to original workspace so we don't steal focus
-    if (current) {
-      execSync(`cmux select-workspace --workspace "${current}"`, { stdio: "inherit" });
+    // Navigate to the new workspace if requested
+    if (navigate) {
+      execSync(`cmux select-workspace --workspace "${name}"`, { stdio: "inherit" });
     }
 
     console.log(chalk.green(`  ✔ Workspace '${name}' created`));
@@ -57,9 +71,15 @@ export const launchCommand = new Command("launch")
     if (!project) {
       // Launch command workspace
       const workspaceName = config.commandName || "command";
+      const hubPath = resolveHome(config.hubVault);
+
+      // Ensure hub vault has CLAUDE.md so Claude knows it's the commander
+      fs.mkdirSync(hubPath, { recursive: true });
+      installClaudeMd("command.CLAUDE.md", hubPath);
+
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
       try {
-        launchWorkspace(workspaceName);
+        launchWorkspace(workspaceName, hubPath, true);
       } catch (err) {
         console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
         process.exit(1);
@@ -77,6 +97,11 @@ export const launchCommand = new Command("launch")
 
       const proj = config.projects[project];
       const workspaceName = proj.captainName;
+      const projPath = resolveHome(proj.path);
+
+      // Install captain CLAUDE.md so Claude knows it's a captain
+      installClaudeMd("captain.CLAUDE.md", projPath);
+
       console.log(
         chalk.bold(
           `\nLaunching captain workspace for '${project}' (${proj.captainName})\n`,
@@ -84,7 +109,7 @@ export const launchCommand = new Command("launch")
       );
 
       try {
-        launchWorkspace(workspaceName, proj.path);
+        launchWorkspace(workspaceName, projPath);
       } catch (err) {
         console.error(
           chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`),
