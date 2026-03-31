@@ -30,15 +30,18 @@ function ensureCmuxReady(): void {
   process.exit(0);
 }
 
-function workspaceExists(name: string): boolean {
+function findWorkspaceRef(name: string): string | null {
   try {
     const output = cmux("list-workspaces");
-    return output.split("\n").some((line) => {
-      const match = line.match(/workspace:\d+\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
-      return match?.[1]?.trim() === name;
-    });
+    for (const line of output.split("\n")) {
+      const match = line.match(/(workspace:\d+)\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
+      if (match && match[2]?.trim() === name) {
+        return match[1]; // e.g. "workspace:3"
+      }
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -63,10 +66,18 @@ function installClaudeMd(templateName: string, destDir: string): void {
 function launchWorkspace(name: string, cwd?: string, navigate = false): void {
   ensureCmuxReady();
 
-  if (workspaceExists(name)) {
+  const existingRef = findWorkspaceRef(name);
+  if (existingRef) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
-    cmux(`select-workspace --workspace "${name}"`);
+    cmux(`select-workspace --workspace "${existingRef}"`);
   } else {
+    // Save current workspace ref to return focus later
+    let currentRef: string | undefined;
+    try {
+      const cur = cmux("current-workspace");
+      currentRef = cur.match(/workspace:\d+/)?.[0];
+    } catch { /* ignore */ }
+
     // Create new workspace with claude session
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
     const output = cmux(`new-workspace --command "claude"${cwdFlag}`);
@@ -77,9 +88,14 @@ function launchWorkspace(name: string, cwd?: string, navigate = false): void {
       cmux(`rename-workspace --workspace "${wsId}" "${name}"`);
     }
 
-    // Navigate to the new workspace if requested
-    if (navigate) {
-      cmux(`select-workspace --workspace "${name}"`);
+    const targetRef = wsId;
+
+    if (navigate && targetRef) {
+      // Navigate to the new workspace
+      cmux(`select-workspace --workspace "${targetRef}"`);
+    } else if (currentRef) {
+      // Return focus to original workspace
+      cmux(`select-workspace --workspace "${currentRef}"`);
     }
 
     console.log(chalk.green(`  ✔ Workspace '${name}' created`));
