@@ -3,9 +3,15 @@ import { execSync } from "node:child_process";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
 
+const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
+
+function cmux(args: string): string {
+  return execSync(`"${CMUX_BIN}" ${args}`, { encoding: "utf-8" }).trim();
+}
+
 function getWorkspaceNames(): string[] {
   try {
-    const output = execSync("cmux list-workspaces", { encoding: "utf-8" });
+    const output = cmux("list-workspaces");
     return output.split("\n")
       .map((line) => {
         const match = line.match(/workspace:\d+\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
@@ -19,7 +25,7 @@ function getWorkspaceNames(): string[] {
 
 function closeWorkspace(name: string): boolean {
   try {
-    execSync(`cmux close-workspace --workspace "${name}"`, { stdio: "inherit" });
+    cmux(`close-workspace --workspace "${name}"`);
     return true;
   } catch {
     return false;

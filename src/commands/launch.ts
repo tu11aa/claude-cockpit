@@ -5,10 +5,35 @@ import path from "node:path";
 import chalk from "chalk";
 import { loadConfig, resolveHome } from "../config.js";
 
+const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
+const CMUX_APP = "/Applications/cmux.app";
+
+function cmux(args: string, opts?: { encoding: "utf-8" }): string {
+  return execSync(`"${CMUX_BIN}" ${args}`, opts ?? { encoding: "utf-8" }).trim();
+}
+
+function ensureCmuxRunning(): void {
+  try {
+    cmux("list-workspaces");
+  } catch {
+    // cmux app not running — open it and wait for it to be ready
+    console.log(chalk.dim("  Starting cmux..."));
+    execSync(`open "${CMUX_APP}"`, { stdio: "inherit" });
+    // Wait for cmux to be responsive
+    for (let i = 0; i < 10; i++) {
+      try {
+        execSync("sleep 1");
+        cmux("list-workspaces");
+        return;
+      } catch { /* retry */ }
+    }
+    throw new Error("cmux failed to start after 10 seconds");
+  }
+}
+
 function workspaceExists(name: string): boolean {
   try {
-    const output = execSync("cmux list-workspaces", { encoding: "utf-8" });
-    // Each line: "  workspace:N  <name>"  or "* workspace:N  <name>  [selected]"
+    const output = cmux("list-workspaces");
     return output.split("\n").some((line) => {
       const match = line.match(/workspace:\d+\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
       return match?.[1]?.trim() === name;
@@ -37,23 +62,25 @@ function installClaudeMd(templateName: string, destDir: string): void {
 }
 
 function launchWorkspace(name: string, cwd?: string, navigate = false): void {
+  ensureCmuxRunning();
+
   if (workspaceExists(name)) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
-    execSync(`cmux select-workspace --workspace "${name}"`, { stdio: "inherit" });
+    cmux(`select-workspace --workspace "${name}"`);
   } else {
     // Create new workspace with claude session
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
-    const output = execSync(`cmux new-workspace --command "claude"${cwdFlag}`, { encoding: "utf-8" }).trim();
+    const output = cmux(`new-workspace --command "claude"${cwdFlag}`);
     const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
 
     // Rename to the desired name
     if (wsId) {
-      execSync(`cmux rename-workspace --workspace "${wsId}" "${name}"`, { stdio: "inherit" });
+      cmux(`rename-workspace --workspace "${wsId}" "${name}"`);
     }
 
     // Navigate to the new workspace if requested
     if (navigate) {
-      execSync(`cmux select-workspace --workspace "${name}"`, { stdio: "inherit" });
+      cmux(`select-workspace --workspace "${name}"`);
     }
 
     console.log(chalk.green(`  ✔ Workspace '${name}' created`));
