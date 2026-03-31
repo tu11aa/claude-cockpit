@@ -63,7 +63,7 @@ function installClaudeMd(templateName: string, destDir: string): void {
   }
 }
 
-function launchWorkspace(name: string, cwd?: string, navigate = false): void {
+function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = false): void {
   ensureCmuxReady();
 
   const existingRef = findWorkspaceRef(name);
@@ -79,8 +79,9 @@ function launchWorkspace(name: string, cwd?: string, navigate = false): void {
     } catch { /* ignore */ }
 
     // Create new workspace with claude session
+    const claudeCmd = fresh ? "claude" : "claude --resume last";
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
-    const output = cmux(`new-workspace --command "claude"${cwdFlag}`);
+    const output = cmux(`new-workspace --command "${claudeCmd}"${cwdFlag}`);
     const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
 
     // Rename to the desired name
@@ -107,7 +108,8 @@ export const launchCommand = new Command("launch")
     "Launch command workspace (no args) or a captain workspace for a project",
   )
   .argument("[project]", "Project name to launch captain for")
-  .action((project: string | undefined) => {
+  .option("--fresh", "Start a new session instead of resuming the last one")
+  .action((project: string | undefined, opts: { fresh?: boolean }) => {
     const config = loadConfig();
 
     if (!project) {
@@ -121,7 +123,7 @@ export const launchCommand = new Command("launch")
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
       try {
-        launchWorkspace(workspaceName, hubPath, true);
+        launchWorkspace(workspaceName, hubPath, true, opts.fresh);
       } catch (err) {
         console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
         process.exit(1);
@@ -151,7 +153,7 @@ export const launchCommand = new Command("launch")
       );
 
       try {
-        launchWorkspace(workspaceName, projPath);
+        launchWorkspace(workspaceName, projPath, false, opts.fresh);
       } catch (err) {
         console.error(
           chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`),
