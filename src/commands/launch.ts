@@ -12,23 +12,22 @@ function cmux(args: string, opts?: { encoding: "utf-8" }): string {
   return execSync(`"${CMUX_BIN}" ${args}`, opts ?? { encoding: "utf-8" }).trim();
 }
 
-function ensureCmuxRunning(): void {
-  try {
-    cmux("list-workspaces");
-  } catch {
-    // cmux app not running — open it and wait for it to be ready
-    console.log(chalk.dim("  Starting cmux..."));
-    execSync(`open "${CMUX_APP}"`, { stdio: "inherit" });
-    // Wait for cmux to be responsive
-    for (let i = 0; i < 10; i++) {
-      try {
-        execSync("sleep 1");
-        cmux("list-workspaces");
-        return;
-      } catch { /* retry */ }
-    }
-    throw new Error("cmux failed to start after 10 seconds");
+function isInsideCmux(): boolean {
+  return !!process.env.CMUX_WORKSPACE_ID;
+}
+
+function ensureCmuxReady(): void {
+  if (isInsideCmux()) {
+    // We're inside cmux — socket API is available
+    return;
   }
+
+  // We're outside cmux — can't use the socket API
+  // Open cmux app and tell the user to run from inside
+  console.log(chalk.yellow("\n  Not running inside cmux. Opening cmux app...\n"));
+  execSync(`open "${CMUX_APP}"`, { stdio: "inherit" });
+  console.log(chalk.bold("  Run `cockpit launch` from inside a cmux workspace.\n"));
+  process.exit(0);
 }
 
 function workspaceExists(name: string): boolean {
@@ -62,7 +61,7 @@ function installClaudeMd(templateName: string, destDir: string): void {
 }
 
 function launchWorkspace(name: string, cwd?: string, navigate = false): void {
-  ensureCmuxRunning();
+  ensureCmuxReady();
 
   if (workspaceExists(name)) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
