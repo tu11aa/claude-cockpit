@@ -3,32 +3,46 @@ import { execSync } from "node:child_process";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
 
-function cmuxWorkspaces(): string[] {
+function workspaceExists(name: string): boolean {
   try {
     const output = execSync("cmux list-workspaces", { encoding: "utf-8" });
-    return output
-      .trim()
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
+    // Each line: "  workspace:N  <name>"  or "* workspace:N  <name>  [selected]"
+    return output.split("\n").some((line) => {
+      const match = line.match(/workspace:\d+\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
+      return match?.[1]?.trim() === name;
+    });
   } catch {
-    return [];
+    return false;
   }
 }
 
-function workspaceExists(name: string): boolean {
-  return cmuxWorkspaces().includes(name);
-}
-
-function launchWorkspace(name: string): void {
+function launchWorkspace(name: string, cwd?: string): void {
   if (workspaceExists(name)) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
-    execSync(`cmux select-workspace ${name}`, { stdio: "inherit" });
+    execSync(`cmux select-workspace --workspace "${name}"`, { stdio: "inherit" });
   } else {
-    execSync(`cmux new-workspace`, { stdio: "inherit" });
-    execSync(`cmux rename-workspace ${name}`, { stdio: "inherit" });
-    execSync(`cmux select-workspace ${name}`, { stdio: "inherit" });
-    console.log(chalk.green(`  ✔ Workspace '${name}' created and selected`));
+    // Save current workspace to return focus
+    let current: string | undefined;
+    try {
+      current = execSync("cmux current-workspace", { encoding: "utf-8" }).trim().split(/\s+/)[0];
+    } catch { /* ignore */ }
+
+    // Create new workspace with claude session
+    const cmdFlag = cwd ? `--command "claude" --cwd "${cwd}"` : `--command "claude"`;
+    const output = execSync(`cmux new-workspace ${cmdFlag}`, { encoding: "utf-8" }).trim();
+    const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
+
+    // Rename to the desired name
+    if (wsId) {
+      execSync(`cmux rename-workspace --workspace "${wsId}" "${name}"`, { stdio: "inherit" });
+    }
+
+    // Return focus to original workspace so we don't steal focus
+    if (current) {
+      execSync(`cmux select-workspace --workspace "${current}"`, { stdio: "inherit" });
+    }
+
+    console.log(chalk.green(`  ✔ Workspace '${name}' created`));
   }
 }
 
@@ -70,7 +84,7 @@ export const launchCommand = new Command("launch")
       );
 
       try {
-        launchWorkspace(workspaceName);
+        launchWorkspace(workspaceName, proj.path);
       } catch (err) {
         console.error(
           chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`),

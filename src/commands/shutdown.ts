@@ -3,13 +3,14 @@ import { execSync } from "node:child_process";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
 
-function cmuxWorkspaces(): string[] {
+function getWorkspaceNames(): string[] {
   try {
     const output = execSync("cmux list-workspaces", { encoding: "utf-8" });
-    return output
-      .trim()
-      .split("\n")
-      .map((l) => l.trim())
+    return output.split("\n")
+      .map((line) => {
+        const match = line.match(/workspace:\d+\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
+        return match?.[1]?.trim() || "";
+      })
       .filter(Boolean);
   } catch {
     return [];
@@ -18,7 +19,7 @@ function cmuxWorkspaces(): string[] {
 
 function closeWorkspace(name: string): boolean {
   try {
-    execSync(`cmux close-workspace ${name}`, { stdio: "inherit" });
+    execSync(`cmux close-workspace --workspace "${name}"`, { stdio: "inherit" });
     return true;
   } catch {
     return false;
@@ -35,7 +36,7 @@ export const shutdownCommand = new Command("shutdown")
 
     if (!project) {
       // Close all captain + command workspaces
-      const workspaces = cmuxWorkspaces();
+      const workspaces = getWorkspaceNames();
       const captainNames = Object.values(config.projects).map((p) => p.captainName);
       const cockpitWorkspaces = workspaces.filter(
         (w) =>
@@ -73,7 +74,7 @@ export const shutdownCommand = new Command("shutdown")
       const workspaceName = config.projects[project].captainName;
       console.log(chalk.bold(`\nShutting down captain workspace for '${project}'...\n`));
 
-      const workspaces = cmuxWorkspaces();
+      const workspaces = getWorkspaceNames();
       if (!workspaces.includes(workspaceName)) {
         console.log(chalk.yellow(`  ⚠ Workspace '${workspaceName}' not found — already closed?\n`));
         return;
