@@ -79,7 +79,7 @@ function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = f
     } catch { /* ignore */ }
 
     // Create new workspace with claude session
-    const claudeCmd = fresh ? "claude" : "claude --resume last";
+    const claudeCmd = fresh ? "claude" : "claude -c";
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
     const output = cmux(`new-workspace --command "${claudeCmd}"${cwdFlag}`);
     const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
