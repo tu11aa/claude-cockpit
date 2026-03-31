@@ -10,6 +10,11 @@ export interface ProjectConfig {
   host: string;
 }
 
+export interface PermissionConfig {
+  command: string;   // permission mode for the command session
+  captain: string;   // permission mode for captain sessions
+}
+
 export interface CockpitConfig {
   commandName: string;
   hubVault: string;
@@ -18,6 +23,7 @@ export interface CockpitConfig {
     maxCrew: number;
     worktreeDir: string;
     teammateMode: string;
+    permissions: PermissionConfig;
   };
   metrics: {
     enabled: boolean;
@@ -37,6 +43,10 @@ export function getDefaultConfig(): CockpitConfig {
       maxCrew: 5,
       worktreeDir: ".worktrees",
       teammateMode: "in-process",
+      permissions: {
+        command: "default",
+        captain: "acceptEdits",
+      },
     },
     metrics: {
       enabled: true,

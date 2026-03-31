@@ -63,7 +63,7 @@ function installClaudeMd(templateName: string, destDir: string): void {
   }
 }
 
-function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = false): void {
+function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = false, permissionMode = "default"): void {
   ensureCmuxReady();
 
   const existingRef = findWorkspaceRef(name);
@@ -79,7 +79,12 @@ function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = f
     } catch { /* ignore */ }
 
     // Create new workspace with claude session
-    const claudeCmd = fresh ? "claude" : "claude -c";
+    let claudeCmd = fresh ? "claude" : "claude -c";
+    if (permissionMode === "acceptEdits") {
+      claudeCmd += " --permission-mode acceptEdits";
+    } else if (permissionMode === "bypassPermissions") {
+      claudeCmd += " --dangerously-skip-permissions";
+    }
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
     const output = cmux(`new-workspace --command "${claudeCmd}"${cwdFlag}`);
     const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
@@ -123,7 +128,7 @@ export const launchCommand = new Command("launch")
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
       try {
-        launchWorkspace(workspaceName, hubPath, true, opts.fresh);
+        launchWorkspace(workspaceName, hubPath, true, opts.fresh, config.defaults.permissions?.command || "default");
       } catch (err) {
         console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
         process.exit(1);
@@ -153,7 +158,7 @@ export const launchCommand = new Command("launch")
       );
 
       try {
-        launchWorkspace(workspaceName, projPath, false, opts.fresh);
+        launchWorkspace(workspaceName, projPath, false, opts.fresh, config.defaults.permissions?.captain || "acceptEdits");
       } catch (err) {
         console.error(
           chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`),
