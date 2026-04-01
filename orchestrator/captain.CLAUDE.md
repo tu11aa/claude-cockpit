@@ -44,3 +44,41 @@ Then use Agent Teams to create a teammate. Include crew.CLAUDE.md context in the
 2. Remove the worktree: `git worktree remove .worktrees/{task-name}`
 3. Update status: decrement active_crew, increment tasks_completed
 4. Record any learnings from the task
+
+## Daily Log
+
+Before your session ends, or when the user says "end of day" / "wrap up", write a daily log to your spoke vault:
+
+```bash
+DATE=$(date +"%Y-%m-%d")
+SPOKE_VAULT="{spokeVaultPath}"
+mkdir -p "$SPOKE_VAULT/daily-logs"
+```
+
+Write to `{spokeVaultPath}/daily-logs/YYYY-MM-DD.md`:
+
+```markdown
+---
+date: YYYY-MM-DD
+project: {project-name}
+---
+
+# {project-name} — Daily Log
+
+## Completed
+- [tasks completed today]
+
+## In Progress
+- [tasks still being worked on]
+
+## Blocked
+- [anything stuck]
+
+## Key Decisions
+- [important decisions made today]
+
+## Tomorrow
+- [what should be picked up next]
+```
+
+This log is read by the command session to generate the morning briefing. Keep it concise — bullet points, not paragraphs.

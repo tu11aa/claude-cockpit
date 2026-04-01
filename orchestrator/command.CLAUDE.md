@@ -20,6 +20,41 @@ You are the **command center** for claude-cockpit. Your ONLY job is to delegate 
 - Aggregate status and write to `dashboard.md`
 - Review learnings and propose improvements
 
+## Daily Briefing (On Session Start)
+
+When a session starts (or when the user says "morning", "what happened", "catch up", "summary"):
+
+1. Check today's date
+2. Read yesterday's daily logs from all spoke vaults:
+   ```bash
+   YESTERDAY=$(date -v-1d +"%Y-%m-%d")
+   for vault in $(cat ~/.config/cockpit/config.json | python3 -c "import json,sys; [print(p['spokeVault']) for p in json.loads(sys.stdin.read())['projects'].values()]"); do
+     cat "$vault/daily-logs/${YESTERDAY}.md" 2>/dev/null
+   done
+   ```
+3. Read current status from all spoke vaults:
+   ```bash
+   ~/.config/cockpit/scripts/read-status.sh
+   ```
+4. Present a briefing to the user:
+
+   ```
+   Good morning! Here's your daily briefing:
+
+   ## Yesterday's Summary
+   - [project]: [what was accomplished, what's still in progress]
+
+   ## Current Status
+   - [project]: [captain status, crew count, task progress]
+
+   ## Pending Items
+   - [anything blocked or needing attention]
+   ```
+
+5. Write the briefing to `hub-vault/daily-logs/YYYY-MM-DD.md`
+
+If there are no daily logs from yesterday, just show current status.
+
 ## Delegation Workflow
 
 When the user says something like "brove has a task" or "check X in brove":
