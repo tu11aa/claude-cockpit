@@ -83,7 +83,7 @@ const addCmd = new Command("add")
       console.log(chalk.yellow(`\n  ⚠ No .git found at ${resolvedPath}. Make sure this is the project root, not a parent directory.\n`));
     }
 
-    const captainName = opts.captain || `${name}-captain`;
+    const captainName = opts.captain || `\u2693 ${name}-captain`;
 
     // Validate captain name is unique across all projects
     const existingCaptains = Object.entries(config.projects)

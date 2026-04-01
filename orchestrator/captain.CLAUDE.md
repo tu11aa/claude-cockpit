@@ -50,6 +50,8 @@ git worktree add .worktrees/{task-name} -b {branch-name}
 
 Then use Agent Teams to create a teammate. Include crew.CLAUDE.md context in the spawn prompt. Tell the teammate to work in the worktree directory.
 
+**Naming convention for crew workspaces:** Use the format `🔧 {project}-crew-{task}` (e.g., `🔧 brove-crew-pvp`). The wrench icon identifies crew workspaces in cmux.
+
 ## How to Write Status
 
 Update status after EVERY significant event. Examples:
