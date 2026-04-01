@@ -109,9 +109,42 @@ Or read a captain's screen (use the workspace:N ref, not the name):
 
 ## How to Register a New Project
 
+When the user asks you to add a project (e.g., "add the brove project"):
+
+### Step 1: Explore the directory
+List the directory to identify git repos inside it:
 ```bash
-cockpit projects add {name} {path}
+ls -la {path}
+find {path} -maxdepth 2 -name ".git" -type d
 ```
+
+### Step 2: Identify the primary project
+Look for the main application repo — usually the largest, most active one. Clues:
+- Has the most recent commits
+- Contains the main application code (package.json, Cargo.toml, etc.)
+- Name matches the project name
+
+### Step 3: Identify siblings
+Other repos in the same directory are likely related. Common patterns:
+- `docs/` → documentation site
+- `*-site`, `*-app` → landing page or web app
+- Fork names (speedrun-X is a fork of scaffold-X)
+- SDKs, extensions, tools
+
+### Step 4: Register with proper groups
+```bash
+# Primary project first (auto-gets primary role)
+cockpit projects add {name} {path/to/main-repo} --group {group-name}
+
+# Siblings with explicit roles
+cockpit projects add {name}-docs {path/to/docs} --group {group-name} --group-role "documentation site"
+cockpit projects add {name}-site {path/to/site} --group {group-name} --group-role "landing page"
+```
+
+### Step 5: Confirm with user
+Show what you registered and ask if the grouping looks right before moving on.
+
+**Always register the actual git repo directory** (the one containing `.git`), NOT the parent directory.
 
 ## Dashboard
 
