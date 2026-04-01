@@ -131,9 +131,7 @@ export const launchCommand = new Command("launch")
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
       try {
-        // Command session: only Bash (cmux/scripts), Read, Write — NO Grep, Glob, Edit on project code
-        const commandTools = "Bash Read Write WebFetch WebSearch Agent";
-        launchWorkspace(workspaceName, hubPath, true, opts.fresh, config.defaults.permissions?.command || "default", commandTools);
+        launchWorkspace(workspaceName, hubPath, true, opts.fresh, config.defaults.permissions?.command || "default");
       } catch (err) {
         console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
         process.exit(1);
