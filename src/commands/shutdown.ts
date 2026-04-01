@@ -9,23 +9,29 @@ function cmux(args: string): string {
   return execSync(`"${CMUX_BIN}" ${args}`, { encoding: "utf-8" }).trim();
 }
 
-function getWorkspaceNames(): string[] {
+interface WorkspaceEntry {
+  ref: string;   // e.g. "workspace:3"
+  name: string;  // e.g. "brove-captain"
+}
+
+function getWorkspaces(): WorkspaceEntry[] {
   try {
     const output = cmux("list-workspaces");
     return output.split("\n")
       .map((line) => {
-        const match = line.match(/workspace:\d+\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
-        return match?.[1]?.trim() || "";
+        const match = line.match(/(workspace:\d+)\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
+        if (!match) return null;
+        return { ref: match[1], name: match[2].trim() };
       })
-      .filter(Boolean);
+      .filter((e): e is WorkspaceEntry => e !== null);
   } catch {
     return [];
   }
 }
 
-function closeWorkspace(name: string): boolean {
+function closeWorkspace(ref: string): boolean {
   try {
-    cmux(`close-workspace --workspace "${name}"`);
+    cmux(`close-workspace --workspace "${ref}"`);
     return true;
   } catch {
     return false;
@@ -42,12 +48,11 @@ export const shutdownCommand = new Command("shutdown")
 
     if (!project) {
       // Close all captain + command workspaces
-      const workspaces = getWorkspaceNames();
+      const workspaces = getWorkspaces();
       const captainNames = Object.values(config.projects).map((p) => p.captainName);
+      const commandName = config.commandName || "command";
       const cockpitWorkspaces = workspaces.filter(
-        (w) =>
-          w === (config.commandName || "command") ||
-          captainNames.includes(w),
+        (w) => w.name === commandName || captainNames.includes(w.name),
       );
 
       if (cockpitWorkspaces.length === 0) {
@@ -58,11 +63,11 @@ export const shutdownCommand = new Command("shutdown")
       console.log(chalk.bold(`\nShutting down ${cockpitWorkspaces.length} workspace(s)...\n`));
 
       for (const ws of cockpitWorkspaces) {
-        const ok = closeWorkspace(ws);
+        const ok = closeWorkspace(ws.ref);
         if (ok) {
-          console.log(chalk.green(`  ✔ Closed: ${ws}`));
+          console.log(chalk.green(`  ✔ Closed: ${ws.name}`));
         } else {
-          console.log(chalk.red(`  ✘ Failed to close: ${ws}`));
+          console.log(chalk.red(`  ✘ Failed to close: ${ws.name}`));
         }
       }
       console.log("");
@@ -77,20 +82,21 @@ export const shutdownCommand = new Command("shutdown")
         process.exit(1);
       }
 
-      const workspaceName = config.projects[project].captainName;
+      const captainName = config.projects[project].captainName;
       console.log(chalk.bold(`\nShutting down captain workspace for '${project}'...\n`));
 
-      const workspaces = getWorkspaceNames();
-      if (!workspaces.includes(workspaceName)) {
-        console.log(chalk.yellow(`  ⚠ Workspace '${workspaceName}' not found — already closed?\n`));
+      const workspaces = getWorkspaces();
+      const ws = workspaces.find((w) => w.name === captainName);
+      if (!ws) {
+        console.log(chalk.yellow(`  ⚠ Workspace '${captainName}' not found — already closed?\n`));
         return;
       }
 
-      const ok = closeWorkspace(workspaceName);
+      const ok = closeWorkspace(ws.ref);
       if (ok) {
-        console.log(chalk.green(`  ✔ Closed: ${workspaceName}\n`));
+        console.log(chalk.green(`  ✔ Closed: ${captainName}\n`));
       } else {
-        console.error(chalk.red(`  ✘ Failed to close workspace '${workspaceName}'\n`));
+        console.error(chalk.red(`  ✘ Failed to close workspace '${captainName}'\n`));
         process.exit(1);
       }
     }
