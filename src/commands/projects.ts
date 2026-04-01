@@ -64,13 +64,31 @@ const addCmd = new Command("add")
   .description("Register a project")
   .argument("<name>", "Project name")
   .argument("<path>", "Path to project directory")
-  .option("--captain <name>", "Captain agent name", "captain")
+  .option("--captain <name>", "Captain workspace name (default: <project>-captain)")
   .option("--spoke <path>", "Spoke vault path (default: ~/cockpit-hub/spokes/<name>)")
-  .action((name: string, projectPath: string, opts: { captain: string; spoke?: string }) => {
+  .action((name: string, projectPath: string, opts: { captain?: string; spoke?: string }) => {
     const config = loadConfig();
 
     if (config.projects[name]) {
       console.log(chalk.yellow(`\n⚠ Project '${name}' already registered. Remove it first.\n`));
+      process.exit(1);
+    }
+
+    const captainName = opts.captain || `${name}-captain`;
+
+    // Validate captain name is unique across all projects
+    const existingCaptains = Object.entries(config.projects)
+      .map(([pName, p]) => ({ project: pName, captain: p.captainName }));
+    const conflict = existingCaptains.find((c) => c.captain === captainName);
+    if (conflict) {
+      console.log(chalk.red(`\n  ✘ Captain name '${captainName}' already used by project '${conflict.project}'.`));
+      console.log(chalk.dim(`  Use --captain <unique-name> to specify a different name.\n`));
+      process.exit(1);
+    }
+
+    // Captain name must not collide with command workspace name
+    if (captainName === (config.commandName || "command")) {
+      console.log(chalk.red(`\n  ✘ Captain name '${captainName}' conflicts with the command workspace name.\n`));
       process.exit(1);
     }
 
@@ -81,7 +99,7 @@ const addCmd = new Command("add")
 
     const project: ProjectConfig = {
       path: resolvedPath,
-      captainName: opts.captain,
+      captainName,
       spokeVault,
       host: "local",
     };
