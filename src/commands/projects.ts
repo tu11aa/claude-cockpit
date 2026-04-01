@@ -45,16 +45,16 @@ const listCmd = new Command("list")
     console.log(chalk.bold("\nRegistered Projects\n"));
     console.log(
       chalk.dim(
-        `  ${"NAME".padEnd(20)} ${"PATH".padEnd(45)} ${"CAPTAIN".padEnd(20)} SPOKE VAULT`,
+        `  ${"NAME".padEnd(18)} ${"CAPTAIN".padEnd(22)} ${"GROUP".padEnd(15)} ${"ROLE".padEnd(18)} PATH`,
       ),
     );
     console.log(chalk.dim("  " + "─".repeat(100)));
 
     for (const [name, project] of projects) {
-      const spokeExists = fs.existsSync(project.spokeVault);
-      const spokeStatus = spokeExists ? chalk.green("✔") : chalk.red("✘");
+      const group = project.group || chalk.dim("—");
+      const role = project.groupRole || chalk.dim("—");
       console.log(
-        `  ${name.padEnd(20)} ${project.path.padEnd(45)} ${project.captainName.padEnd(20)} ${spokeStatus} ${project.spokeVault}`,
+        `  ${name.padEnd(18)} ${project.captainName.padEnd(22)} ${String(group).padEnd(15)} ${String(role).padEnd(18)} ${project.path}`,
       );
     }
     console.log("");
@@ -66,7 +66,9 @@ const addCmd = new Command("add")
   .argument("<path>", "Path to project directory")
   .option("--captain <name>", "Captain workspace name (default: <project>-captain)")
   .option("--spoke <path>", "Spoke vault path (default: ~/cockpit-hub/spokes/<name>)")
-  .action((name: string, projectPath: string, opts: { captain?: string; spoke?: string }) => {
+  .option("--group <name>", "Project group name (siblings share context)")
+  .option("--group-role <role>", "Role within the group (auto-set to 'primary' if first in group)")
+  .action((name: string, projectPath: string, opts: { captain?: string; spoke?: string; group?: string; groupRole?: string }) => {
     const config = loadConfig();
 
     if (config.projects[name]) {
@@ -98,6 +100,40 @@ const addCmd = new Command("add")
       console.log(chalk.red(`\n  ✘ Captain name '${captainName}' conflicts with the command workspace name.\n`));
       process.exit(1);
     }
+    // Handle project groups
+    let group = opts.group;
+    let groupRole = opts.groupRole;
+    if (group) {
+      const siblings = Object.entries(config.projects)
+        .filter(([, p]) => p.group === group);
+      const primary = siblings.find(([, p]) => p.groupRole === "primary");
+
+      if (siblings.length === 0) {
+        // First project in this group — auto-assign primary
+        if (!groupRole) {
+          groupRole = "primary";
+          console.log(chalk.dim(`  Auto-assigned as primary for group '${group}'`));
+        }
+      } else if (!groupRole) {
+        // Group exists, no role specified — show siblings and require a role
+        console.log(chalk.yellow(`\n  Group '${group}' already has ${siblings.length} project(s):`));
+        for (const [sName, sProj] of siblings) {
+          console.log(chalk.dim(`    - ${sName} (${sProj.groupRole || "no role"})`));
+        }
+        if (primary) {
+          console.log(chalk.red(`\n  ✘ Please specify --group-role (e.g., "fork of ${primary[0]}", "landing page", "docs")\n`));
+        } else {
+          console.log(chalk.red(`\n  ✘ Please specify --group-role (e.g., "primary", "fork", "landing page", "docs")\n`));
+        }
+        process.exit(1);
+      }
+
+      // Warn if trying to set primary when one already exists
+      if (groupRole === "primary" && primary) {
+        console.log(chalk.yellow(`\n  ⚠ Group '${group}' already has '${primary[0]}' as primary. Overriding.`));
+      }
+    }
+
     const spokeVault = opts.spoke
       ? resolveHome(opts.spoke)
       : path.join(config.hubVault, "spokes", name);
@@ -107,6 +143,8 @@ const addCmd = new Command("add")
       captainName,
       spokeVault,
       host: "local",
+      ...(group && { group }),
+      ...(groupRole && { groupRole }),
     };
 
     config.projects[name] = project;

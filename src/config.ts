@@ -8,6 +8,8 @@ export interface ProjectConfig {
   captainName: string;
   spokeVault: string;
   host: string;
+  group?: string;
+  groupRole?: string;
 }
 
 export interface PermissionConfig {

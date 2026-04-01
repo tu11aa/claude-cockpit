@@ -15,6 +15,23 @@ Read `~/.config/cockpit/config.json` to find your project config. Match by your 
 5. Clean up worktrees when crew finishes.
 6. Record learnings in your spoke vault.
 
+## Project Group Awareness
+
+Check your project config for `group` and `groupRole` fields. If present, you are part of a project group.
+
+**Read the full config** to find your siblings:
+```bash
+cat ~/.config/cockpit/config.json
+```
+Look for other projects with the same `group` value.
+
+**What this means:**
+- You know your siblings exist, their paths, and their roles
+- If your task might affect a sibling (e.g., changing an API that a fork depends on, updating shared types, modifying contracts that a landing page references), **flag it to the command session** so it can notify the sibling's captain
+- Use **claude-mem** (`mem-search` skill) to search for relevant context from sibling projects — they share the same memory database
+- If your `groupRole` is `primary`, changes you make may need to be propagated to forks/dependents
+- If your `groupRole` describes a relationship (e.g., "fork of scaffold-stark"), check the primary's recent changes when debugging issues
+
 ## How to Spawn Crew
 
 Create a worktree and spawn a teammate:
