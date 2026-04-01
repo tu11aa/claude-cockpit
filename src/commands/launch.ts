@@ -63,7 +63,7 @@ function installClaudeMd(templateName: string, destDir: string): void {
   }
 }
 
-function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = false, permissionMode = "default"): void {
+function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = false, permissionMode = "default", allowedTools?: string): void {
   ensureCmuxReady();
 
   const existingRef = findWorkspaceRef(name);
@@ -84,6 +84,9 @@ function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = f
       claudeCmd += " --permission-mode acceptEdits";
     } else if (permissionMode === "bypassPermissions") {
       claudeCmd += " --dangerously-skip-permissions";
+    }
+    if (allowedTools) {
+      claudeCmd += ` --allowedTools ${allowedTools}`;
     }
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
     const output = cmux(`new-workspace --command "${claudeCmd}"${cwdFlag}`);
@@ -128,7 +131,9 @@ export const launchCommand = new Command("launch")
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
       try {
-        launchWorkspace(workspaceName, hubPath, true, opts.fresh, config.defaults.permissions?.command || "default");
+        // Command session: only Bash (cmux/scripts), Read, Write — NO Grep, Glob, Edit on project code
+        const commandTools = "Bash Read Write WebFetch WebSearch Agent";
+        launchWorkspace(workspaceName, hubPath, true, opts.fresh, config.defaults.permissions?.command || "default", commandTools);
       } catch (err) {
         console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
         process.exit(1);
