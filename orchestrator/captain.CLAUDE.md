@@ -42,13 +42,16 @@ Look for other projects with the same `group` value.
 
 ## How to Spawn Crew
 
-Create a worktree and spawn a teammate:
+Use the Agent tool with `isolation: "worktree"` to spawn crew in isolated worktrees. Claude Code handles worktree creation, branch setup, and cleanup automatically.
 
-```bash
-git worktree add .worktrees/{task-name} -b {branch-name}
+```
+Spawn a teammate using Agent Teams. In the spawn prompt:
+- Set isolation: "worktree" so the agent works in its own worktree
+- Include the task description and context
+- Tell them they are a crew member (crew.CLAUDE.md context)
 ```
 
-Then use Agent Teams to create a teammate. Include crew.CLAUDE.md context in the spawn prompt. Tell the teammate to work in the worktree directory.
+Do NOT manually run `git worktree add`. Let Claude Code's built-in worktree system handle it — it verifies .gitignore, creates the worktree, and auto-cleans up when the agent finishes.
 
 **Naming convention for crew workspaces:** Use the format `🔧 {project}-crew-{task}` (e.g., `🔧 brove-crew-pvp`). The wrench icon identifies crew workspaces in cmux.
 
@@ -88,7 +91,7 @@ Update status after EVERY significant event. Examples:
 ## When a Crew Member Finishes
 
 1. Merge their worktree branch if appropriate
-2. Remove the worktree: `git worktree remove .worktrees/{task-name}`
+2. Worktree cleanup is automatic if using Claude Code's built-in worktrees. If a worktree was created manually, remove it: `git worktree remove .worktrees/{task-name}`
 3. Update status: decrement active_crew, increment tasks_completed
 4. Record any learnings from the task
 
