@@ -64,9 +64,9 @@ Match the user's request to a project in `~/.config/cockpit/config.json`.
 
 ### Step 2: Check if captain workspace exists
 ```bash
-cmux list-workspaces
+/Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces
 ```
-Look for the captain workspace name (e.g., "brove-captain").
+Look for the captain workspace name (e.g., "brove-captain") in the output. Each line shows `workspace:N  <name>`. The `workspace:N` part is the **ref** — you MUST use this ref (not the name) in all cmux commands.
 
 ### Step 3: If captain doesn't exist, spawn it
 ```bash
@@ -75,10 +75,16 @@ Look for the captain workspace name (e.g., "brove-captain").
 Wait a few seconds for it to initialize.
 
 ### Step 4: Send the task to the captain
+First, find the captain's workspace ref:
 ```bash
-cmux send --workspace "{captainName}" "The user's task description here — include all context they gave you"
-cmux send-key --workspace "{captainName}" Enter
+/Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces
 ```
+Find the line with the captain name, note its `workspace:N` ref. Then:
+```bash
+/Applications/cmux.app/Contents/Resources/bin/cmux send --workspace "workspace:N" "The user's task description here — include all context they gave you"
+/Applications/cmux.app/Contents/Resources/bin/cmux send-key --workspace "workspace:N" Enter
+```
+Replace `workspace:N` with the actual ref from list-workspaces.
 
 ### Step 5: Report back to the user
 Tell the user: "Delegated to {captainName}. You can switch to that workspace to monitor progress."
@@ -90,9 +96,11 @@ Read spoke vault status files:
 ~/.config/cockpit/scripts/read-status.sh
 ```
 
-Or read a captain's screen:
+Or read a captain's screen (use the workspace:N ref, not the name):
 ```bash
-cmux read-screen --workspace "{captainName}"
+/Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces
+# Find the ref for the captain, then:
+/Applications/cmux.app/Contents/Resources/bin/cmux read-screen --workspace "workspace:N"
 ```
 
 ## How to Register a New Project

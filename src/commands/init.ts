@@ -118,9 +118,7 @@ export const initCommand = new Command("init")
     console.log("");
     console.log("  4. Run " + chalk.cyan("cockpit doctor") + " to verify setup\n");
 
-    try {
-      execSync("which cmux", { stdio: "ignore" });
-    } catch {
-      console.log(chalk.yellow("  ⚠ cmux not found — install with: npm install -g cmux\n"));
+    if (!fs.existsSync("/Applications/cmux.app")) {
+      console.log(chalk.yellow("  ⚠ cmux not found — download from https://cmux.dev\n"));
     }
   });

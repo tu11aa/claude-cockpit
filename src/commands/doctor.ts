@@ -77,7 +77,7 @@ export const doctorCommand = new Command("doctor")
 
     results.push(check("Claude Code installed", commandExists("claude")));
     results.push(check("Claude Code version >= 2.1.32", claudeVersionOk()));
-    results.push(check("cmux installed", commandExists("cmux")));
+    results.push(check("cmux installed", commandExists("cmux") || fs.existsSync("/Applications/cmux.app")));
     results.push(check("Obsidian installed", commandExists("obsidian") || fs.existsSync("/Applications/Obsidian.app")));
     results.push(check("Node.js >= 18", nodeVersionOk()));
     results.push(
