@@ -74,6 +74,13 @@ const addCmd = new Command("add")
       process.exit(1);
     }
 
+    const resolvedPath = resolveHome(projectPath);
+
+    // Warn if path doesn't look like a git repo
+    if (!fs.existsSync(path.join(resolvedPath, ".git"))) {
+      console.log(chalk.yellow(`\n  ⚠ No .git found at ${resolvedPath}. Make sure this is the project root, not a parent directory.\n`));
+    }
+
     const captainName = opts.captain || `${name}-captain`;
 
     // Validate captain name is unique across all projects
@@ -91,8 +98,6 @@ const addCmd = new Command("add")
       console.log(chalk.red(`\n  ✘ Captain name '${captainName}' conflicts with the command workspace name.\n`));
       process.exit(1);
     }
-
-    const resolvedPath = resolveHome(projectPath);
     const spokeVault = opts.spoke
       ? resolveHome(opts.spoke)
       : path.join(config.hubVault, "spokes", name);
