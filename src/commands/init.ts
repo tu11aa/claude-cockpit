@@ -83,7 +83,24 @@ export const initCommand = new Command("init")
       console.log(chalk.yellow("  ⚠ Scripts directory not found in package"));
     }
 
-    // 4. Enable Agent Teams in settings.json if not set
+    // 4. Copy CLAUDE.md role templates to ~/.config/cockpit/templates/
+    const orchestratorDir = path.join(pkgRoot, "orchestrator");
+    const templatesTarget = path.join(configDir, "templates");
+    if (fs.existsSync(orchestratorDir)) {
+      fs.mkdirSync(templatesTarget, { recursive: true });
+      for (const file of fs.readdirSync(orchestratorDir)) {
+        if (file.endsWith(".CLAUDE.md")) {
+          const src = path.join(orchestratorDir, file);
+          const dest = path.join(templatesTarget, file);
+          fs.copyFileSync(src, dest);
+        }
+      }
+      console.log(chalk.green(`  ✔ Role templates copied to ${templatesTarget}`));
+    } else {
+      console.log(chalk.yellow("  ⚠ Orchestrator templates not found in package"));
+    }
+
+    // 5. Enable Agent Teams in settings.json if not set
     const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
     try {
       let settings: Record<string, unknown> = {};

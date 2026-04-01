@@ -2,14 +2,16 @@ import { Command } from "commander";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import chalk from "chalk";
 import { loadConfig, resolveHome } from "../config.js";
 
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const CMUX_APP = "/Applications/cmux.app";
+const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 
-function cmux(args: string, opts?: { encoding: "utf-8" }): string {
-  return execSync(`"${CMUX_BIN}" ${args}`, opts ?? { encoding: "utf-8" }).trim();
+function cmux(args: string): string {
+  return execSync(`"${CMUX_BIN}" ${args}`, { encoding: "utf-8" }).trim();
 }
 
 function isInsideCmux(): boolean {
@@ -17,13 +19,8 @@ function isInsideCmux(): boolean {
 }
 
 function ensureCmuxReady(): void {
-  if (isInsideCmux()) {
-    // We're inside cmux — socket API is available
-    return;
-  }
+  if (isInsideCmux()) return;
 
-  // We're outside cmux — can't use the socket API
-  // Open cmux app and tell the user to run from inside
   console.log(chalk.yellow("\n  Not running inside cmux. Opening cmux app...\n"));
   execSync(`open "${CMUX_APP}"`, { stdio: "inherit" });
   console.log(chalk.bold("  Run `cockpit launch` from inside a cmux workspace.\n"));
@@ -36,7 +33,7 @@ function findWorkspaceRef(name: string): string | null {
     for (const line of output.split("\n")) {
       const match = line.match(/(workspace:\d+)\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
       if (match && match[2]?.trim() === name) {
-        return match[1]; // e.g. "workspace:3"
+        return match[1];
       }
     }
     return null;
@@ -45,25 +42,33 @@ function findWorkspaceRef(name: string): string | null {
   }
 }
 
-function findPackageRoot(): string {
-  let dir = path.dirname(new URL(import.meta.url).pathname);
-  while (dir !== "/") {
-    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
-    dir = path.dirname(dir);
+function buildClaudeCmd(role: string, fresh: boolean, permissionMode: string): string {
+  let cmd = fresh ? "claude" : "claude -c";
+
+  if (permissionMode === "acceptEdits") {
+    cmd += " --permission-mode acceptEdits";
+  } else if (permissionMode === "bypassPermissions") {
+    cmd += " --dangerously-skip-permissions";
   }
-  return process.cwd();
+
+  // Append role-specific CLAUDE.md via system prompt (preserves project's own CLAUDE.md)
+  const roleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
+  if (fs.existsSync(roleFile)) {
+    cmd += ` --append-system-prompt-file ${roleFile}`;
+  }
+
+  // Captains also get learnings instructions
+  if (role === "captain") {
+    const learningsFile = path.join(TEMPLATES_DIR, "learnings.CLAUDE.md");
+    if (fs.existsSync(learningsFile)) {
+      cmd += ` --append-system-prompt-file ${learningsFile}`;
+    }
+  }
+
+  return cmd;
 }
 
-function installClaudeMd(templateName: string, destDir: string): void {
-  const pkgRoot = findPackageRoot();
-  const src = path.join(pkgRoot, "orchestrator", templateName);
-  const dest = path.join(destDir, "CLAUDE.md");
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, dest);
-  }
-}
-
-function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = false, permissionMode = "default", allowedTools?: string): void {
+function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate = false): void {
   ensureCmuxReady();
 
   const existingRef = findWorkspaceRef(name);
@@ -71,39 +76,23 @@ function launchWorkspace(name: string, cwd?: string, navigate = false, fresh = f
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
     cmux(`select-workspace --workspace "${existingRef}"`);
   } else {
-    // Save current workspace ref to return focus later
     let currentRef: string | undefined;
     try {
       const cur = cmux("current-workspace");
       currentRef = cur.match(/workspace:\d+/)?.[0];
     } catch { /* ignore */ }
 
-    // Create new workspace with claude session
-    let claudeCmd = fresh ? "claude" : "claude -c";
-    if (permissionMode === "acceptEdits") {
-      claudeCmd += " --permission-mode acceptEdits";
-    } else if (permissionMode === "bypassPermissions") {
-      claudeCmd += " --dangerously-skip-permissions";
-    }
-    if (allowedTools) {
-      claudeCmd += ` --allowedTools ${allowedTools}`;
-    }
     const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
     const output = cmux(`new-workspace --command "${claudeCmd}"${cwdFlag}`);
     const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
 
-    // Rename to the desired name
     if (wsId) {
       cmux(`rename-workspace --workspace "${wsId}" "${name}"`);
     }
 
-    const targetRef = wsId;
-
-    if (navigate && targetRef) {
-      // Navigate to the new workspace
-      cmux(`select-workspace --workspace "${targetRef}"`);
+    if (navigate && wsId) {
+      cmux(`select-workspace --workspace "${wsId}"`);
     } else if (currentRef) {
-      // Return focus to original workspace
       cmux(`select-workspace --workspace "${currentRef}"`);
     }
 
@@ -124,14 +113,13 @@ export const launchCommand = new Command("launch")
       // Launch command workspace
       const workspaceName = config.commandName || "command";
       const hubPath = resolveHome(config.hubVault);
-
-      // Ensure hub vault has CLAUDE.md so Claude knows it's the commander
       fs.mkdirSync(hubPath, { recursive: true });
-      installClaudeMd("command.CLAUDE.md", hubPath);
+
+      const claudeCmd = buildClaudeCmd("command", !!opts.fresh, config.defaults.permissions?.command || "default");
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
       try {
-        launchWorkspace(workspaceName, hubPath, true, opts.fresh, config.defaults.permissions?.command || "default");
+        launchWorkspace(workspaceName, claudeCmd, hubPath, true);
       } catch (err) {
         console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
         process.exit(1);
@@ -148,11 +136,8 @@ export const launchCommand = new Command("launch")
       }
 
       const proj = config.projects[project];
-      const workspaceName = proj.captainName;
       const projPath = resolveHome(proj.path);
-
-      // Install captain CLAUDE.md so Claude knows it's a captain
-      installClaudeMd("captain.CLAUDE.md", projPath);
+      const claudeCmd = buildClaudeCmd("captain", !!opts.fresh, config.defaults.permissions?.captain || "acceptEdits");
 
       console.log(
         chalk.bold(
@@ -161,7 +146,7 @@ export const launchCommand = new Command("launch")
       );
 
       try {
-        launchWorkspace(workspaceName, projPath, false, opts.fresh, config.defaults.permissions?.captain || "acceptEdits");
+        launchWorkspace(proj.captainName, claudeCmd, projPath);
       } catch (err) {
         console.error(
           chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`),
