@@ -66,25 +66,29 @@ Match the user's request to a project in `~/.config/cockpit/config.json`.
 ```bash
 /Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces
 ```
-Look for the captain workspace name (e.g., "brove-captain") in the output. Each line shows `workspace:N  <name>`. The `workspace:N` part is the **ref** — you MUST use this ref (not the name) in all cmux commands.
+Look at the output. Each line shows `workspace:N  <name>`.
 
-### Step 3: If captain doesn't exist, spawn it
+**CRITICAL: Match the EXACT captainName from config.** For example, if config says `"captainName": "brove-captain"`, you must find a workspace named EXACTLY `brove-captain`. A workspace named `Brove`, `brove`, or `brove-tmp` is NOT the captain — those are user workspaces. Do NOT send tasks to them.
+
+### Step 3: If captain workspace does NOT exist (no exact match), spawn it
 ```bash
 ~/.config/cockpit/scripts/spawn-workspace.sh "{captainName}" "{projectPath}"
 ```
-Wait a few seconds for it to initialize.
+Wait a few seconds for it to initialize. Then re-run list-workspaces to get its ref.
+
+**NEVER reuse an existing workspace that has a similar-sounding name.** Always spawn a new captain workspace with the exact captainName from config.
 
 ### Step 4: Send the task to the captain
-First, find the captain's workspace ref:
+Run list-workspaces and find the line with the EXACT captain name:
 ```bash
 /Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces
 ```
-Find the line with the captain name, note its `workspace:N` ref. Then:
+Extract the `workspace:N` ref from that line. Then:
 ```bash
 /Applications/cmux.app/Contents/Resources/bin/cmux send --workspace "workspace:N" "The user's task description here — include all context they gave you"
 /Applications/cmux.app/Contents/Resources/bin/cmux send-key --workspace "workspace:N" Enter
 ```
-Replace `workspace:N` with the actual ref from list-workspaces.
+Replace `workspace:N` with the actual ref.
 
 ### Step 5: Report back to the user
 Tell the user: "Delegated to {captainName}. You can switch to that workspace to monitor progress."
