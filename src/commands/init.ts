@@ -100,7 +100,17 @@ export const initCommand = new Command("init")
       console.log(chalk.yellow("  ⚠ Orchestrator templates not found in package"));
     }
 
-    // 5. Enable Agent Teams in settings.json if not set
+    // 5. Copy cockpit plugin (skills) to ~/.config/cockpit/plugin/
+    const pluginSrc = path.join(pkgRoot, "plugin");
+    const pluginTarget = path.join(configDir, "plugin");
+    if (fs.existsSync(pluginSrc)) {
+      copyDirRecursive(pluginSrc, pluginTarget);
+      console.log(chalk.green(`  ✔ Cockpit plugin (skills) copied to ${pluginTarget}`));
+    } else {
+      console.log(chalk.yellow("  ⚠ Plugin directory not found in package"));
+    }
+
+    // 6. Enable Agent Teams in settings.json if not set
     const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
     try {
       let settings: Record<string, unknown> = {};

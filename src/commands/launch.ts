@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { execSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -9,6 +10,86 @@ import { loadConfig, resolveHome } from "../config.js";
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const CMUX_APP = "/Applications/cmux.app";
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
+const SESSIONS_PATH = path.join(os.homedir(), ".config", "cockpit", "sessions.json");
+
+interface SessionRecord {
+  lastLaunched: string; // YYYY-MM-DD
+  templateHash: string;
+}
+
+interface SessionsFile {
+  workspaces: Record<string, SessionRecord>;
+}
+
+function loadSessions(): SessionsFile {
+  try {
+    return JSON.parse(fs.readFileSync(SESSIONS_PATH, "utf-8"));
+  } catch {
+    return { workspaces: {} };
+  }
+}
+
+function saveSessions(sessions: SessionsFile): void {
+  const dir = path.dirname(SESSIONS_PATH);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(SESSIONS_PATH, JSON.stringify(sessions, null, 2) + "\n");
+}
+
+function computeTemplateHash(role: string): string {
+  const hash = crypto.createHash("sha256");
+
+  // Hash the role template
+  const roleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
+  if (fs.existsSync(roleFile)) {
+    hash.update(fs.readFileSync(roleFile, "utf-8"));
+  }
+
+  // Also hash plugin skills so template changes trigger fresh sessions
+  const pluginSkillsDir = path.join(TEMPLATES_DIR, "..", "plugin", "skills");
+  if (fs.existsSync(pluginSkillsDir)) {
+    for (const skill of fs.readdirSync(pluginSkillsDir).sort()) {
+      const skillFile = path.join(pluginSkillsDir, skill, "SKILL.md");
+      if (fs.existsSync(skillFile)) {
+        hash.update(fs.readFileSync(skillFile, "utf-8"));
+      }
+    }
+  }
+
+  return hash.digest("hex").slice(0, 16);
+}
+
+function shouldStartFresh(
+  workspaceName: string,
+  role: string,
+): { fresh: boolean; reason?: string } {
+  const sessions = loadSessions();
+  const record = sessions.workspaces[workspaceName];
+  const today = new Date().toISOString().slice(0, 10);
+  const currentHash = computeTemplateHash(role);
+
+  if (!record) {
+    return { fresh: true, reason: "first launch" };
+  }
+
+  if (record.lastLaunched !== today) {
+    return { fresh: true, reason: "new day — starting fresh session" };
+  }
+
+  if (record.templateHash !== currentHash) {
+    return { fresh: true, reason: "template instructions updated" };
+  }
+
+  return { fresh: false };
+}
+
+function recordSession(workspaceName: string, role: string): void {
+  const sessions = loadSessions();
+  sessions.workspaces[workspaceName] = {
+    lastLaunched: new Date().toISOString().slice(0, 10),
+    templateHash: computeTemplateHash(role),
+  };
+  saveSessions(sessions);
+}
 
 function cmux(args: string): string {
   return execSync(`"${CMUX_BIN}" ${args}`, { encoding: "utf-8" }).trim();
@@ -51,31 +132,38 @@ function buildClaudeCmd(role: string, fresh: boolean, permissionMode: string): s
     cmd += " --dangerously-skip-permissions";
   }
 
-  // Append role-specific CLAUDE.md via system prompt (preserves project's own CLAUDE.md)
+  // Append role-specific template (slim — detailed instructions are in cockpit skills)
   const roleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
   if (fs.existsSync(roleFile)) {
     cmd += ` --append-system-prompt-file ${roleFile}`;
   }
 
-  // Captains also get learnings instructions
-  if (role === "captain") {
-    const learningsFile = path.join(TEMPLATES_DIR, "learnings.CLAUDE.md");
-    if (fs.existsSync(learningsFile)) {
-      cmd += ` --append-system-prompt-file ${learningsFile}`;
-    }
+  // Load cockpit plugin for skills (captain-ops, command-ops, daily-log, etc.)
+  const pluginDir = path.join(TEMPLATES_DIR, "..", "plugin");
+  if (fs.existsSync(pluginDir)) {
+    cmd += ` --plugin-dir ${pluginDir}`;
   }
 
   return cmd;
 }
 
-function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate = false): void {
+function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate = false, forceFresh = false, pinToTop = false, initialPrompt?: string): void {
   ensureCmuxReady();
 
   const existingRef = findWorkspaceRef(name);
-  if (existingRef) {
+  if (existingRef && forceFresh) {
+    // Close stale workspace so a fresh one can be created
+    console.log(chalk.yellow(`  Closing stale workspace '${name}' for fresh start`));
+    try {
+      cmux(`close-workspace --workspace "${existingRef}"`);
+    } catch { /* may already be closing */ }
+  } else if (existingRef) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
     cmux(`select-workspace --workspace "${existingRef}"`);
-  } else {
+    return;
+  }
+
+  {
     let currentRef: string | undefined;
     try {
       const cur = cmux("current-workspace");
@@ -88,6 +176,21 @@ function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate
 
     if (wsId) {
       cmux(`rename-workspace --workspace "${wsId}" "${name}"`);
+      if (pinToTop) {
+        try {
+          cmux(`workspace-action --workspace "${wsId}" --action pin`);
+        } catch { /* pin is best-effort */ }
+      }
+    }
+
+    // Send initial prompt to trigger startup behavior
+    if (wsId && initialPrompt) {
+      // Small delay to let Claude Code initialize before sending prompt
+      setTimeout(() => {
+        try {
+          cmux(`send --workspace "${wsId}" "${initialPrompt.replace(/"/g, '\\"')}"`);
+        } catch { /* best-effort */ }
+      }, 3000);
     }
 
     if (navigate && wsId) {
@@ -102,27 +205,95 @@ function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate
 
 export const launchCommand = new Command("launch")
   .description(
-    "Launch command workspace (no args) or a captain workspace for a project",
+    "Launch command workspace (no args), a captain for a project, or --all for everything",
   )
   .argument("[project]", "Project name to launch captain for")
   .option("--fresh", "Start a new session instead of resuming the last one")
-  .action((project: string | undefined, opts: { fresh?: boolean }) => {
+  .option("--all", "Launch command workspace + reactor + all captain workspaces")
+  .option("--reactor", "Also launch the reactor workspace")
+  .action((project: string | undefined, opts: { fresh?: boolean; all?: boolean; reactor?: boolean }) => {
     const config = loadConfig();
 
-    if (!project) {
-      // Launch command workspace
+    function launchOne(
+      workspaceName: string,
+      role: string,
+      cwd: string,
+      permissionMode: string,
+      navigate: boolean,
+      pinToTop = false,
+    ): void {
+      let forceFresh = !!opts.fresh;
+      if (!forceFresh) {
+        const auto = shouldStartFresh(workspaceName, role);
+        if (auto.fresh) {
+          console.log(chalk.cyan(`  ↻ ${auto.reason}`));
+          forceFresh = true;
+        }
+      }
+
+      const claudeCmd = buildClaudeCmd(role, forceFresh, permissionMode);
+      recordSession(workspaceName, role);
+
+      // Auto-trigger startup checklist
+      let initialPrompt: string | undefined;
+      if (role === "captain") {
+        initialPrompt = "Run your startup checklist: use the cockpit:captain-ops skill, complete all startup steps, then report ready.";
+      } else if (role === "command") {
+        initialPrompt = "Run your startup checklist: use the cockpit:command-ops skill, complete your daily briefing, then report ready.";
+      } else if (role === "reactor") {
+        initialPrompt = "Run your startup checklist: use the cockpit:reactor-ops skill, verify gh auth, read reactions.json, then start your poll loop.";
+      }
+
+      try {
+        launchWorkspace(workspaceName, claudeCmd, cwd, navigate, forceFresh, pinToTop, initialPrompt);
+      } catch (err) {
+        console.error(chalk.red(`  ✘ Failed: ${(err as Error).message}`));
+      }
+    }
+
+    if (opts.all) {
+      // Launch command + all captains
       const workspaceName = config.commandName || "command";
       const hubPath = resolveHome(config.hubVault);
       fs.mkdirSync(hubPath, { recursive: true });
 
-      const claudeCmd = buildClaudeCmd("command", !!opts.fresh, config.defaults.permissions?.command || "default");
+      console.log(chalk.bold("\nLaunching all cockpit workspaces\n"));
+      console.log(chalk.bold(`  Command: ${workspaceName}`));
+      launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
+
+      // Launch reactor (after command, before captains)
+      const reactorName = "⚡ reactor";
+      console.log(chalk.bold(`\n  Reactor: ${reactorName}`));
+      launchOne(reactorName, "reactor", hubPath, config.defaults.permissions?.reactor || "default", false, true);
+
+      for (const [name, proj] of Object.entries(config.projects)) {
+        const projPath = resolveHome(proj.path);
+        // Ensure spoke vault exists
+        const spokePath = resolveHome(proj.spokeVault);
+        if (!fs.existsSync(spokePath)) {
+          fs.mkdirSync(spokePath, { recursive: true });
+          for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates"]) {
+            fs.mkdirSync(path.join(spokePath, sub), { recursive: true });
+          }
+          console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
+        }
+        console.log(chalk.bold(`\n  Captain: ${proj.captainName} (${name})`));
+        launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true);
+      }
+      console.log("");
+    } else if (!project) {
+      // Launch command workspace only (+ reactor if --reactor)
+      const workspaceName = config.commandName || "command";
+      const hubPath = resolveHome(config.hubVault);
+      fs.mkdirSync(hubPath, { recursive: true });
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
-      try {
-        launchWorkspace(workspaceName, claudeCmd, hubPath, true);
-      } catch (err) {
-        console.error(chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`));
-        process.exit(1);
+      launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
+
+      if (opts.reactor) {
+        const reactorName = "⚡ reactor";
+        console.log(chalk.bold(`\nLaunching reactor: ${reactorName}\n`));
+        launchOne(reactorName, "reactor", hubPath, config.defaults.permissions?.reactor || "default", false, true);
       }
     } else {
       // Launch captain workspace for a project
@@ -137,21 +308,22 @@ export const launchCommand = new Command("launch")
 
       const proj = config.projects[project];
       const projPath = resolveHome(proj.path);
-      const claudeCmd = buildClaudeCmd("captain", !!opts.fresh, config.defaults.permissions?.captain || "acceptEdits");
+
+      // Ensure spoke vault exists
+      const spokePath = resolveHome(proj.spokeVault);
+      if (!fs.existsSync(spokePath)) {
+        fs.mkdirSync(spokePath, { recursive: true });
+        for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates"]) {
+          fs.mkdirSync(path.join(spokePath, sub), { recursive: true });
+        }
+        console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
+      }
 
       console.log(
         chalk.bold(
           `\nLaunching captain workspace for '${project}' (${proj.captainName})\n`,
         ),
       );
-
-      try {
-        launchWorkspace(proj.captainName, claudeCmd, projPath);
-      } catch (err) {
-        console.error(
-          chalk.red(`\n  ✘ Failed to launch workspace: ${(err as Error).message}\n`),
-        );
-        process.exit(1);
-      }
+      launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true);
     }
   });
