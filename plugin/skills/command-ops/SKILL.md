@@ -9,8 +9,17 @@ description: Complete command playbook — daily briefing, delegation workflow, 
 
 Run when session starts, or user says "morning", "catch up", "summary":
 
-1. Search **claude-mem** (`mem-search` skill) for recent activity across all projects.
-2. Read yesterday's logs:
+1. **Check handoffs from all projects** (context from yesterday's sessions):
+```bash
+for vault in $(cat ~/.config/cockpit/config.json | python3 -c "import json,sys; [print(p['spokeVault']) for p in json.loads(sys.stdin.read())['projects'].values()]"); do
+  echo "=== $(basename $vault) ==="
+  ~/.config/cockpit/scripts/read-handoff.sh "$vault" --keep
+done
+```
+Handoffs contain: currentState, openBranches, nextSteps, blockedItems, decisions. Use these to understand where each project left off.
+
+2. Search **claude-mem** (`mem-search` skill) for recent activity across all projects.
+3. Read yesterday's logs:
 ```bash
 YESTERDAY=$(date -v-1d +"%Y-%m-%d")
 for vault in $(cat ~/.config/cockpit/config.json | python3 -c "import json,sys; [print(p['spokeVault']) for p in json.loads(sys.stdin.read())['projects'].values()]"); do
@@ -18,8 +27,9 @@ for vault in $(cat ~/.config/cockpit/config.json | python3 -c "import json,sys; 
   cat "$vault/daily-logs/${YESTERDAY}.md" 2>/dev/null || echo "(no log)"
 done
 ```
-3. Read current status: `~/.config/cockpit/scripts/read-status.sh`
-4. Present briefing, then save to `{hubVault}/daily-logs/YYYY-MM-DD.md`
+4. Read current status: `~/.config/cockpit/scripts/read-status.sh`
+5. Run quick standup for context: `cockpit standup --yesterday --raw`
+6. Present briefing, then save to `{hubVault}/daily-logs/YYYY-MM-DD.md`
 
 ## Delegation Workflow
 

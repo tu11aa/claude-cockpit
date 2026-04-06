@@ -8,11 +8,22 @@ description: Complete captain playbook — session startup, crew spawning, statu
 ## Session Startup
 
 1. Read `~/.config/cockpit/config.json` — match your current working directory. Note your `spokeVault`, `group`, `groupRole`, and `maxCrew` (default: 5).
-2. Search **claude-mem** (`mem-search` skill) for your project name to get continuity from previous sessions.
-3. Check `{spokeVault}/daily-logs/` — read the most recent log if one exists.
-4. Check `{spokeVault}/learnings/` — **selectively** load relevant learnings (see "Selective Loading" section below). Do NOT read all files — grep by task keywords and tags.
-5. Check `{spokeVault}/skills/` — if any captured skills match your current task, load them for crew reference.
-6. Write active status:
+2. **Check for handoff from previous session:**
+```bash
+~/.config/cockpit/scripts/read-handoff.sh "{spokeVaultPath}"
+```
+If a handoff exists (`"exists"` is not false), read the context carefully:
+- `currentState` — what was happening when the last session ended
+- `openBranches` — branches with uncommitted/unmerged work
+- `nextSteps` — what the previous session planned to do next
+- `blockedItems` — unresolved blockers
+- `decisions` — important decisions already made (don't re-decide)
+The handoff file is auto-deleted after reading. Use this as your primary context source.
+3. Search **claude-mem** (`mem-search` skill) for your project name to get additional continuity.
+4. Check `{spokeVault}/daily-logs/` — read the most recent log if one exists.
+5. Check `{spokeVault}/learnings/` — **selectively** load relevant learnings (see "Selective Loading" section below). Do NOT read all files — grep by task keywords and tags.
+6. Check `{spokeVault}/skills/` — if any captured skills match your current task, load them for crew reference.
+7. Write active status:
 ```bash
 ~/.config/cockpit/scripts/write-status.sh "{spokeVaultPath}" "captain_session" "active" "Captain session started"
 ```
@@ -25,6 +36,44 @@ TeamCreate(team_name: "{project}-crew", description: "Crew for {project}")
 ```
 
 This gives you persistent crew members, shared task lists, and mid-task messaging.
+
+## Task Decomposition with Task Master
+
+When you receive a **PRD, large feature request, or multi-step scope** from command, use **Task Master MCP** to decompose it before spawning crew.
+
+### If a PRD file exists in the project:
+```
+mcp__task-master-ai__parse_prd(input: ".taskmaster/docs/prd.txt", projectRoot: "{projectPath}")
+```
+This generates `tasks.json` with structured tasks, dependencies, and complexity scores.
+
+### Query tasks:
+```
+mcp__task-master-ai__get_tasks(projectRoot: "{projectPath}")           # List all tasks
+mcp__task-master-ai__next_task(projectRoot: "{projectPath}")           # Get highest-priority unblocked task
+mcp__task-master-ai__get_task(id: "1", projectRoot: "{projectPath}")   # Get specific task details
+```
+
+### Update task status as crew works:
+```
+mcp__task-master-ai__set_task_status(id: "1", status: "in-progress", projectRoot: "{projectPath}")
+mcp__task-master-ai__set_task_status(id: "1", status: "done", projectRoot: "{projectPath}")
+```
+
+### Expand complex tasks into subtasks:
+```
+mcp__task-master-ai__expand_task(id: "1", projectRoot: "{projectPath}")
+```
+
+### Workflow:
+1. Receive scope from command → **parse PRD** (or manually create tasks if no PRD file)
+2. **get_tasks** to see the full dependency graph
+3. **next_task** to find what's unblocked and highest priority
+4. Spawn crew for that task
+5. When crew finishes → **set_task_status** to "done" → **next_task** for the next one
+6. Repeat until all tasks are done
+
+**Note:** Task Master requires an AI provider API key (ANTHROPIC_API_KEY) for `parse_prd` and `expand_task`. If unavailable, create tasks manually using the project's task breakdown file (e.g., `pact-network-tasks.md`) and use Task Master only for status tracking.
 
 ## Spawning Crew
 
@@ -98,6 +147,33 @@ CMD_WS=$(/Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces 2>&1
 - All assigned work is done (report idle)
 
 **If you forget to close out, the dashboard will show stale data and command won't know you're done.**
+
+## Session Shutdown — Write Handoff
+
+**When the user says "wrap up", "end of day", or "shutdown", OR when you have no more tasks:**
+
+1. First, write the daily log (use `cockpit:daily-log` skill).
+2. Then, write a handoff file so tomorrow's session can resume instantly:
+
+```bash
+~/.config/cockpit/scripts/write-handoff.sh "{spokeVaultPath}" '{
+  "currentState": "Brief description of where things stand",
+  "openBranches": ["feat/branch-name — what it contains"],
+  "nextSteps": ["First thing to do tomorrow", "Second thing"],
+  "blockedItems": ["Any unresolved blockers"],
+  "decisions": ["Key decisions made this session that should not be revisited"],
+  "activeTasks": "Summary of task progress (e.g., 3/7 done)"
+}'
+```
+
+3. Update status to inactive:
+```bash
+~/.config/cockpit/scripts/write-status.sh "{spokeVaultPath}" "captain_session" "inactive" "Session ended — handoff written"
+```
+
+4. Report to command that you're going offline.
+
+**The handoff is your gift to tomorrow's session.** Be specific. "Working on the API" is useless. "Backend routes for /providers and /providers/:id are done, /timeseries endpoint is next, PR #12 is open for review" is useful.
 
 ## Group Awareness
 
