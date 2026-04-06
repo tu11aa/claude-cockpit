@@ -1,35 +1,40 @@
-# Learnings — Self-Enhancement Instructions
+# Learnings — Self-Evolving Knowledge System
 
-This document instructs agents on how to record and review learnings for continuous improvement.
+Agents record, evolve, and reuse knowledge. Inspired by OpenSpace's skill evolution.
 
-## When to Record a Learning
-
-Record after:
-- A task completes (what went well, what didn't)
-- An unexpected issue was encountered
-- A workaround was needed for a tool limitation
-- A pattern was discovered that could help future tasks
-- A CLAUDE.md instruction was unclear or missing
-
-## Categories
-
-- `workflow` — process improvements, task management
-- `template` — vault template or file format improvements
-- `convention` — naming, structure, or organization suggestions
-- `bug` — tool bugs or unexpected behaviors
-- `insight` — domain knowledge or architectural understanding
-
-## How to Record
+## Record Learnings (with tags)
 
 ```bash
-~/.config/cockpit/scripts/record-learning.sh "{spokeVaultPath}" "{category}" "{description and suggestion}"
+~/.config/cockpit/scripts/record-learning.sh "{spokeVault}" "{category}" "{description}" "{tags}"
+```
+- Categories: `workflow`, `template`, `convention`, `bug`, `insight`
+- Tags: comma-separated keywords for selective retrieval
+
+## Capture Skills (CAPTURED)
+
+After a successful novel pattern, capture it as a reusable skill:
+```bash
+~/.config/cockpit/scripts/capture-skill.sh "{spokeVault}" "{name}" "{description}" "{body}"
 ```
 
-## For the Command Session: Reviewing Learnings
+## Fix Skills (FIX)
 
-1. Periodically scan all spoke vaults for unapplied learnings
-2. Group by category and identify patterns
-3. If the same issue appears across 2+ projects, flag it as systemic
-4. Propose specific changes (which file, what to change, why)
-5. Present to user for approval
-6. After approval, apply the change and mark the learning as `applied: true`
+When a skill's instructions are broken or outdated:
+```bash
+~/.config/cockpit/scripts/fix-skill.sh "{spokeVault}" "{name}" "{corrected body}"
+```
+
+## Quality Tracking
+
+- `mark-learning-useful.sh` — increment usefulness counter
+- Loaded 5+ times but never useful → stale, skip it
+- Skill used 3+ times but never successful → flag for FIX
+
+## For Command Session: Review & Evolve
+
+1. Scan all spoke vaults for unapplied learnings
+2. Group by category, identify cross-project patterns
+3. If same issue in 2+ projects → propose a **captured skill**
+4. If a skill keeps failing → propose a **fix**
+5. Present changes to user for approval
+6. Apply and mark as `applied: true`

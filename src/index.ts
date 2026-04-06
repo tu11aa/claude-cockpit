@@ -8,6 +8,7 @@ import { statusCommand } from "./commands/status.js";
 import { launchCommand } from "./commands/launch.js";
 import { shutdownCommand } from "./commands/shutdown.js";
 import { feedbackCommand } from "./commands/feedback.js";
+import { reactorCommand } from "./commands/reactor.js";
 
 const program = new Command();
 
@@ -23,5 +24,6 @@ program.addCommand(statusCommand);
 program.addCommand(launchCommand);
 program.addCommand(shutdownCommand);
 program.addCommand(feedbackCommand);
+program.addCommand(reactorCommand);
 
 program.parse();
