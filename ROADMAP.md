@@ -15,9 +15,9 @@ Cockpit v0.1.x is a working multi-project agent orchestration system with:
 
 ## Roadmap
 
-### P0 — Critical (Next 2 weeks)
+### P0 — Critical (Next 2 weeks) — ✅ ALL DONE
 
-#### 1. Task Master MCP Integration
+#### 1. Task Master MCP Integration ✅
 **Why:** Rick gives PRDs, Alan needs structured task decomposition. No tool in cockpit breaks down PRDs into dependency-aware tasks today.
 **What:**
 - Register task-master-ai as MCP server in cockpit config
@@ -25,8 +25,9 @@ Cockpit v0.1.x is a working multi-project agent orchestration system with:
 - Task Master's `tasks.json` lives in project root, captain queries it for crew assignments
 - Add to captain-ops skill: "After receiving a PRD or large scope, use Task Master to decompose before spawning crew"
 **Depends on:** task-master-ai npm package (installed globally)
+**Status:** Installed globally, registered as MCP server, integrated into captain-ops skill. Works via Max subscription — no separate API key needed.
 
-#### 2. `cockpit standup` Command
+#### 2. `cockpit standup` Command ✅
 **Why:** Rick expects daily async standups. Currently captain writes daily-log manually and there's no formatted output for sharing.
 **What:**
 - New CLI command: `cockpit standup [--project <name>] [--all] [--yesterday]`
@@ -35,8 +36,9 @@ Cockpit v0.1.x is a working multi-project agent orchestration system with:
 - Output: formatted markdown block (what done, what next, blockers, time allocation)
 - Optional: `--slack` flag to post to a webhook
 **Effort:** ~2-4 hours
+**Status:** Implemented in `src/commands/standup.ts`.
 
-#### 3. Session Handoff Files
+#### 3. Session Handoff Files ✅
 **Why:** New day = forced fresh session = lost context. claude-mem helps but is unstructured. GSD solves this with HANDOFF.json.
 **What:**
 - Captain writes `handoff.json` to spoke vault at session end (manual trigger or auto on shutdown)
@@ -44,6 +46,7 @@ Cockpit v0.1.x is a working multi-project agent orchestration system with:
 - captain-ops startup reads handoff.json if it exists, loads context, then deletes it
 - Command writes hub-level handoff aggregating all projects
 **Effort:** ~2-3 hours
+**Status:** `scripts/write-handoff.sh` + `scripts/read-handoff.sh`. Captain-ops reads on startup, writes on shutdown.
 
 ### P1 — High Priority (April)
 
