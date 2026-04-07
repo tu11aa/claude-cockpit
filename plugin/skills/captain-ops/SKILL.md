@@ -79,19 +79,40 @@ mcp__task-master-ai__expand_task(id: "1", projectRoot: "{projectPath}")
 
 **You MUST spawn a crew member for ANY coding task** — even a one-line change. You are a coordinator. You plan, delegate, review, and merge. You do NOT write code yourself.
 
-Use the **Agent tool** with `team_name` and `isolation: "worktree"`:
+Use the **Agent tool** with `team_name`, `isolation: "worktree"`, and the appropriate `model`:
 ```
 Agent(
   team_name: "{project}-crew",
   name: "🔧 {project}-crew-{task}",
   isolation: "worktree",
+  model: "sonnet",
   prompt: "You are a crew member on {project}. Your task: {description}. Branch from: {branch}. Files involved: {files}."
+)
+```
+
+For **review tasks**, use Opus for higher quality:
+```
+Agent(
+  team_name: "{project}-crew",
+  name: "🔍 {project}-review-{task}",
+  model: "opus",
+  prompt: "Review the changes on branch {branch}. Check for: correctness, edge cases, test coverage, style."
+)
+```
+
+For **exploration/research**, use Haiku for cost efficiency:
+```
+Agent(
+  name: "explore-{topic}",
+  model: "haiku",
+  prompt: "Quickly find: {question}. Return a concise answer."
 )
 ```
 
 - Do **NOT** manually run `git worktree add`
 - Do **NOT** edit source code yourself — always delegate to crew
 - Respect `maxCrew` limit
+- **Model routing**: `sonnet` for coding, `opus` for reviews, `haiku` for exploration
 - Give clear context: what to change, which files, which branch to base from
 - Crew members **persist** — you can send follow-up instructions via `SendMessage(to: "🔧 {project}-crew-{task}", message: "...")`
 

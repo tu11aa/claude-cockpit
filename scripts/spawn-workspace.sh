@@ -90,6 +90,20 @@ elif [ "$PERM_MODE" = "bypassPermissions" ]; then
   CLAUDE_CMD="${CLAUDE_CMD} --dangerously-skip-permissions"
 fi
 
+# Read model routing from config
+MODEL=$(python3 -c "
+import json
+try:
+    cfg = json.load(open('${HOME}/.config/cockpit/config.json'))
+    models = cfg.get('defaults', {}).get('models', {})
+    print(models.get('$ROLE', ''))
+except: print('')
+" 2>/dev/null)
+
+if [ -n "$MODEL" ]; then
+  CLAUDE_CMD="${CLAUDE_CMD} --model ${MODEL}"
+fi
+
 # Append role template (slim — detailed instructions are in cockpit skills)
 ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.CLAUDE.md"
 if [ -f "$ROLE_FILE" ]; then

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import chalk from "chalk";
-import { loadConfig, resolveHome } from "../config.js";
+import { loadConfig, resolveHome, type ModelRoutingConfig } from "../config.js";
 
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const CMUX_APP = "/Applications/cmux.app";
@@ -123,13 +123,17 @@ function findWorkspaceRef(name: string): string | null {
   }
 }
 
-function buildClaudeCmd(role: string, fresh: boolean, permissionMode: string): string {
+function buildClaudeCmd(role: string, fresh: boolean, permissionMode: string, model?: string): string {
   let cmd = fresh ? "claude" : "claude -c";
 
   if (permissionMode === "acceptEdits") {
     cmd += " --permission-mode acceptEdits";
   } else if (permissionMode === "bypassPermissions") {
     cmd += " --dangerously-skip-permissions";
+  }
+
+  if (model) {
+    cmd += ` --model ${model}`;
   }
 
   // Append role-specific template (slim — detailed instructions are in cockpit skills)
@@ -231,7 +235,8 @@ export const launchCommand = new Command("launch")
         }
       }
 
-      const claudeCmd = buildClaudeCmd(role, forceFresh, permissionMode);
+      const model = config.defaults.models?.[role as keyof ModelRoutingConfig];
+      const claudeCmd = buildClaudeCmd(role, forceFresh, permissionMode, model);
       recordSession(workspaceName, role);
 
       // Auto-trigger startup checklist
