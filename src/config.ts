@@ -18,6 +18,17 @@ export interface PermissionConfig {
   reactor?: string;  // permission mode for reactor session
 }
 
+export type ModelAlias = "opus" | "sonnet" | "haiku";
+
+export interface ModelRoutingConfig {
+  command: ModelAlias;
+  captain: ModelAlias;
+  crew: ModelAlias;
+  reactor: ModelAlias;
+  exploration: ModelAlias;
+  review: ModelAlias;
+}
+
 // --- Reaction Engine Types ---
 
 export interface GitHubRepoConfig {
@@ -83,6 +94,7 @@ export interface CockpitConfig {
     worktreeDir: string;
     teammateMode: string;
     permissions: PermissionConfig;
+    models?: ModelRoutingConfig;
   };
   metrics: {
     enabled: boolean;
@@ -105,6 +117,14 @@ export function getDefaultConfig(): CockpitConfig {
       permissions: {
         command: "default",
         captain: "acceptEdits",
+      },
+      models: {
+        command: "opus",
+        captain: "opus",
+        crew: "sonnet",
+        reactor: "sonnet",
+        exploration: "haiku",
+        review: "opus",
       },
     },
     metrics: {
