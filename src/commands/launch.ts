@@ -277,7 +277,7 @@ export const launchCommand = new Command("launch")
         const spokePath = resolveHome(proj.spokeVault);
         if (!fs.existsSync(spokePath)) {
           fs.mkdirSync(spokePath, { recursive: true });
-          for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates"]) {
+          for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates", "wiki", "wiki/pages"]) {
             fs.mkdirSync(path.join(spokePath, sub), { recursive: true });
           }
           console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
@@ -318,7 +318,7 @@ export const launchCommand = new Command("launch")
       const spokePath = resolveHome(proj.spokeVault);
       if (!fs.existsSync(spokePath)) {
         fs.mkdirSync(spokePath, { recursive: true });
-        for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates"]) {
+        for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates", "wiki", "wiki/pages"]) {
           fs.mkdirSync(path.join(spokePath, sub), { recursive: true });
         }
         console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));

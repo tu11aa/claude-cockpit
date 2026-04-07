@@ -134,3 +134,29 @@ Run a manual cycle: `cockpit reactor check`
 4. If a skill keeps failing → propose a **fix**
 5. Propose specific changes to the user
 6. After approval, apply and mark `applied: true`
+
+## Wiki Aggregation (Hub Knowledge Base)
+
+Periodically review spoke wikis across all projects to build a cross-project knowledge base.
+
+### 1. Scan spoke wiki indexes
+```bash
+for vault in $(cat ~/.config/cockpit/config.json | python3 -c "import json,sys; [print(p['spokeVault']) for p in json.loads(sys.stdin.read())['projects'].values()]"); do
+  echo "=== $(basename $vault) ==="
+  cat "$vault/wiki/index.md" 2>/dev/null || echo "(no wiki)"
+done
+```
+
+### 2. Identify cross-project knowledge
+If a pattern appears in 2+ spoke wikis, create a hub-level wiki page that synthesizes both.
+
+### 3. Create hub wiki pages
+```bash
+~/.config/cockpit/scripts/wiki-ingest.sh "{hubVaultPath}" "{slug}" "{title}" "{category}" "{body}" "{tags}" "aggregated from spoke wikis"
+```
+
+### 4. Wiki health check
+During daily briefing, check for:
+- Projects with zero wiki pages (captains not compiling knowledge)
+- Stale wiki pages (not updated in 2+ weeks)
+- Missing cross-references between related pages
