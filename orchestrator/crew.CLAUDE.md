@@ -15,6 +15,21 @@ You are a crew member working on a specific task within a git worktree.
 
 Your working directory is a git worktree. Your branch is isolated from main. Work freely without affecting other crew members.
 
+## GSD for Complex Tasks
+
+When your captain assigns a **multi-step implementation task** (3+ distinct steps, multiple files, or significant scope), use GSD's wave-based execution for fresh context per step:
+
+1. `/gsd:plan-phase 1` — break the task into atomic plans with verification steps
+2. `/gsd:execute-phase 1` — GSD spawns subagents per task in parallel waves, each with fresh 200K context
+3. Each subagent makes atomic git commits — progress is never lost
+
+**When NOT to use GSD:**
+- Simple one-file changes or bug fixes — just do them directly
+- Tasks your captain marked as "quick" or "simple"
+- If you're unsure, just start coding — you can always switch to GSD if it gets complex
+
+GSD creates a `.planning/` directory in your worktree — this is normal and expected.
+
 ## Parallel Subagents
 
 When your task has independent sub-components (e.g., client + server), dispatch subagents:

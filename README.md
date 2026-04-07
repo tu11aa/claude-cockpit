@@ -31,13 +31,20 @@ cockpit doctor
 - [Claude Code](https://claude.ai/code) >= 2.1.32
 - [cmux](https://cmux.dev) (macOS terminal for coding agents)
 - [Obsidian](https://obsidian.md) (status tracking)
-- Node.js >= 18
+- Node.js >= 22
 
-### Claude Code Plugins
+### Required Integrations
 
-```
+```bash
+# Claude Memory — cross-session continuity
 /plugin marketplace add thedotmack/claude-mem
 /plugin install claude-mem
+
+# Task Master — PRD decomposition (works via Max subscription)
+npm install -g task-master-ai
+
+# GSD — wave-based execution for crew (fresh context per step)
+npx get-shit-done-cc@latest --claude --global
 ```
 
 See `core/plugins.md` for full plugin setup.
@@ -53,11 +60,15 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 | `cockpit init` | First-time setup — config, hub vault, scripts |
 | `cockpit launch` | Start the command workspace |
 | `cockpit launch <project>` | Start a specific project captain |
+| `cockpit launch --all` | Launch command + reactor + all captains |
 | `cockpit status` | Show all project status (no Claude needed) |
+| `cockpit standup` | Daily standup summary (zero LLM tokens) |
 | `cockpit doctor` | Health check — verify dependencies |
 | `cockpit projects list` | List registered projects |
 | `cockpit projects add <name> <path>` | Register a project |
 | `cockpit projects remove <name>` | Unregister a project |
+| `cockpit reactor check` | Run one reactor poll cycle |
+| `cockpit reactor status` | Show reactor state |
 | `cockpit shutdown [project]` | Graceful shutdown |
 | `cockpit feedback` | Open opt-in feedback issue |
 
@@ -65,18 +76,35 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 
 ### Roles
 
-- **Command** — overseer, monitors all projects, spawns captains
-- **Captain** — project leader, uses Agent Teams + git worktrees
-- **Crew** — worker in a worktree, can spawn subagents for parallel work
+- **Command** (Opus) — overseer, monitors all projects, spawns captains
+- **Captain** (Opus) — project leader, uses Agent Teams + git worktrees
+- **Crew** (Sonnet) — worker in a worktree, uses GSD for complex tasks
+- **Reactor** (Sonnet) — always-on GitHub event poller, auto-delegates to captains
+
+### Model Routing
+
+Each role runs on the optimal model for cost/quality tradeoff. Configured in `config.json`:
+- Command/Captain/Review: Opus (coordination + quality)
+- Crew/Reactor: Sonnet (execution)
+- Exploration: Haiku (cheap lookups)
 
 ### Obsidian Vaults (Hub-and-Spoke)
 
-- **Hub vault** (`~/cockpit-hub`) — cross-project dashboard
-- **Spoke vaults** (`{project}/.cockpit-vault/`) — per-project status
+- **Hub vault** (`~/cockpit-hub`) — cross-project dashboard + hub wiki
+- **Spoke vaults** — per-project status, learnings, and wiki
 
-### Self-Enhancement
+### Knowledge System
 
-Agents record learnings. The command session reviews them, identifies patterns, and proposes improvements. Changes only apply after user approval.
+- **Learnings** — raw observations recorded by captains after tasks
+- **Wiki** — compiled, indexed knowledge pages in spoke vaults (`wiki/pages/`)
+- **Hub Wiki** — cross-project knowledge aggregated by command
+- Scripts: `wiki-ingest.sh`, `wiki-query.sh`, `wiki-log.sh`
+
+### Session Continuity
+
+- **Handoff files** — captain writes context on shutdown, reads on startup
+- **Session freshness** — auto-detects new day or template changes, forces fresh context
+- **claude-mem** — cross-session memory via MCP plugin
 
 ## Config
 
@@ -90,14 +118,26 @@ Agents record learnings. The command session reviews them, identifies patterns, 
     "brove": {
       "path": "~/projects/brove",
       "captainName": "brove-captain",
-      "spokeVault": "~/projects/.cockpit-vault",
+      "spokeVault": "~/cockpit-hub/spokes/brove",
       "host": "local"
     }
   },
   "defaults": {
     "maxCrew": 5,
     "worktreeDir": ".worktrees",
-    "teammateMode": "in-process"
+    "teammateMode": "in-process",
+    "permissions": {
+      "command": "default",
+      "captain": "acceptEdits"
+    },
+    "models": {
+      "command": "opus",
+      "captain": "opus",
+      "crew": "sonnet",
+      "reactor": "sonnet",
+      "exploration": "haiku",
+      "review": "opus"
+    }
   }
 }
 ```

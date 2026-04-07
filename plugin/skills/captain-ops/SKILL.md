@@ -120,6 +120,8 @@ Agent(
 - **Model routing**: `sonnet` for coding, `opus` for reviews, `haiku` for exploration
 - Give clear context: what to change, which files, which branch to base from
 - Crew members **persist** — you can send follow-up instructions via `SendMessage(to: "🔧 {project}-crew-{task}", message: "...")`
+- **For complex multi-step tasks** (3+ steps, multiple files): tell crew to use GSD — add to the prompt: "This is a complex task. Use `/gsd:plan-phase` and `/gsd:execute-phase` for wave-based execution with fresh context per step."
+- **For simple tasks**: don't mention GSD — crew will handle it directly
 
 ## Task Coordination
 
