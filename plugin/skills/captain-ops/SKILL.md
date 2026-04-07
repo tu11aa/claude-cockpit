@@ -23,7 +23,12 @@ The handoff file is auto-deleted after reading. Use this as your primary context
 4. Check `{spokeVault}/daily-logs/` — read the most recent log if one exists.
 5. Check `{spokeVault}/learnings/` — **selectively** load relevant learnings (see "Selective Loading" section below). Do NOT read all files — grep by task keywords and tags.
 6. Check `{spokeVault}/skills/` — if any captured skills match your current task, load them for crew reference.
-7. Write active status:
+7. Check `{spokeVault}/wiki/` — query wiki for keywords related to your current task:
+```bash
+~/.config/cockpit/scripts/wiki-query.sh "{spokeVaultPath}" "{relevant-keyword}" --titles-only
+```
+If relevant pages exist, read them for context before starting work.
+8. Write active status:
 ```bash
 ~/.config/cockpit/scripts/write-status.sh "{spokeVaultPath}" "captain_session" "active" "Captain session started"
 ```
@@ -153,7 +158,8 @@ CMD_WS=$(/Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces 2>&1
 **When the user says "wrap up", "end of day", or "shutdown", OR when you have no more tasks:**
 
 1. First, write the daily log (use `cockpit:daily-log` skill).
-2. Then, write a handoff file so tomorrow's session can resume instantly:
+2. Review today's learnings — if any were marked useful or represent compiled knowledge, promote to wiki pages using `cockpit:wiki-ops`.
+3. Then, write a handoff file so tomorrow's session can resume instantly:
 
 ```bash
 ~/.config/cockpit/scripts/write-handoff.sh "{spokeVaultPath}" '{
@@ -191,6 +197,19 @@ Record after tasks complete, unexpected issues, or discovered patterns:
 ```
 - Categories: `workflow`, `template`, `convention`, `bug`, `insight`
 - Tags: comma-separated keywords for selective loading (e.g., `cairo,escrow,pvp`)
+
+## Wiki Compilation
+
+After completing tasks or discovering notable patterns, compile knowledge into the wiki. Use the `cockpit:wiki-ops` skill for full instructions.
+
+1. **After each task**: If you learned how something works, create/update a wiki page
+2. **During session shutdown**: Review today's learnings — promote useful ones to wiki pages
+3. **Before starting work**: Query the wiki for relevant context:
+```bash
+~/.config/cockpit/scripts/wiki-query.sh "{spokeVaultPath}" "{task-keywords}"
+```
+
+**Learnings vs Wiki**: Learnings are raw observations (quick to record). Wiki pages are compiled, structured knowledge (worth maintaining). Promote a learning when it's been useful 2+ times or represents how a system works.
 
 ## Selective Loading (on session start)
 
