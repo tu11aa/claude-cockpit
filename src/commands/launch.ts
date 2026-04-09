@@ -41,9 +41,12 @@ function computeTemplateHash(role: string): string {
   const hash = crypto.createHash("sha256");
 
   // Hash the role template
-  const roleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
+  const roleFile = path.join(TEMPLATES_DIR, `${role}.claude.md`);
+  const legacyRoleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
   if (fs.existsSync(roleFile)) {
     hash.update(fs.readFileSync(roleFile, "utf-8"));
+  } else if (fs.existsSync(legacyRoleFile)) {
+    hash.update(fs.readFileSync(legacyRoleFile, "utf-8"));
   }
 
   // Also hash plugin skills so template changes trigger fresh sessions

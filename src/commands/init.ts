@@ -89,7 +89,7 @@ export const initCommand = new Command("init")
     if (fs.existsSync(orchestratorDir)) {
       fs.mkdirSync(templatesTarget, { recursive: true });
       for (const file of fs.readdirSync(orchestratorDir)) {
-        if (file.endsWith(".CLAUDE.md")) {
+        if (file.endsWith(".claude.md") || file.endsWith(".generic.md") || file.endsWith(".CLAUDE.md")) {
           const src = path.join(orchestratorDir, file);
           const dest = path.join(templatesTarget, file);
           fs.copyFileSync(src, dest);
