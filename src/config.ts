@@ -29,6 +29,18 @@ export interface ModelRoutingConfig {
   review: ModelAlias;
 }
 
+export interface AgentEntry {
+  cli: string;
+  driver: string;
+}
+
+export interface RoleAssignment {
+  agent: string;
+  model?: string;
+}
+
+export type RoleConfig = Partial<Record<"command" | "captain" | "crew" | "reactor" | "exploration", RoleAssignment>>;
+
 // --- Reaction Engine Types ---
 
 export interface GitHubRepoConfig {
@@ -89,12 +101,14 @@ export interface CockpitConfig {
   commandName: string;
   hubVault: string;
   projects: Record<string, ProjectConfig>;
+  agents?: Record<string, AgentEntry>;
   defaults: {
     maxCrew: number;
     worktreeDir: string;
     teammateMode: string;
     permissions: PermissionConfig;
     models?: ModelRoutingConfig;
+    roles?: RoleConfig;
   };
   metrics: {
     enabled: boolean;
@@ -110,6 +124,9 @@ export function getDefaultConfig(): CockpitConfig {
     commandName: "\u{1F3DB}\u{FE0F} command",
     hubVault: path.join(os.homedir(), "cockpit-hub"),
     projects: {},
+    agents: {
+      claude: { cli: "claude", driver: "claude" },
+    },
     defaults: {
       maxCrew: 5,
       worktreeDir: ".worktrees",
@@ -126,6 +143,13 @@ export function getDefaultConfig(): CockpitConfig {
         exploration: "haiku",
         review: "opus",
       },
+      roles: {
+        command: { agent: "claude", model: "opus" },
+        captain: { agent: "claude", model: "opus" },
+        crew: { agent: "claude", model: "sonnet" },
+        reactor: { agent: "claude", model: "sonnet" },
+        exploration: { agent: "claude", model: "haiku" },
+      },
     },
     metrics: {
       enabled: true,
@@ -137,7 +161,26 @@ export function getDefaultConfig(): CockpitConfig {
 export function loadConfig(configPath = DEFAULT_CONFIG_PATH): CockpitConfig {
   try {
     const raw = fs.readFileSync(configPath, "utf-8");
-    return JSON.parse(raw) as CockpitConfig;
+    const config = JSON.parse(raw) as CockpitConfig;
+
+    // Backward compat: migrate models → roles if roles not set
+    if (config.defaults.models && !config.defaults.roles) {
+      const m = config.defaults.models;
+      config.defaults.roles = {
+        command: { agent: "claude", model: m.command },
+        captain: { agent: "claude", model: m.captain },
+        crew: { agent: "claude", model: m.crew },
+        reactor: { agent: "claude", model: m.reactor },
+        exploration: { agent: "claude", model: m.exploration },
+      };
+    }
+
+    // Ensure agents has at least claude
+    if (!config.agents) {
+      config.agents = { claude: { cli: "claude", driver: "claude" } };
+    }
+
+    return config;
   } catch {
     return getDefaultConfig();
   }
