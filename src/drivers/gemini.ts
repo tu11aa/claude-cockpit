@@ -8,7 +8,7 @@ export function createGeminiDriver(): AgentDriver {
 
     async probe(): Promise<AgentProbeResult> {
       try {
-        const version = execSync("gemini --version", { encoding: "utf-8" }).trim();
+        const version = execSync("gemini --version", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
         return {
           installed: true,
           version,

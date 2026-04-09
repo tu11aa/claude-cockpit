@@ -8,8 +8,8 @@ export function createCodexDriver(): AgentDriver {
 
     async probe(): Promise<AgentProbeResult> {
       try {
-        const version = execSync("codex --version", { encoding: "utf-8" }).trim();
-        const help = execSync("codex --help", { encoding: "utf-8" });
+        const version = execSync("codex --version", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+        const help = execSync("codex --help", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
         const hasExec = help.includes("exec");
         return {
           installed: true,
