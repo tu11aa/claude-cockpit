@@ -6,6 +6,8 @@ import path from "node:path";
 import os from "node:os";
 import chalk from "chalk";
 import { loadConfig, resolveHome, type ModelRoutingConfig } from "../config.js";
+import { createClaudeDriver, createCodexDriver, createGeminiDriver, createAiderDriver, CapabilityRegistry } from "../drivers/index.js";
+import type { AgentDriver, Role } from "../drivers/types.js";
 
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const CMUX_APP = "/Applications/cmux.app";
@@ -39,9 +41,12 @@ function computeTemplateHash(role: string): string {
   const hash = crypto.createHash("sha256");
 
   // Hash the role template
-  const roleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
+  const roleFile = path.join(TEMPLATES_DIR, `${role}.claude.md`);
+  const legacyRoleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
   if (fs.existsSync(roleFile)) {
     hash.update(fs.readFileSync(roleFile, "utf-8"));
+  } else if (fs.existsSync(legacyRoleFile)) {
+    hash.update(fs.readFileSync(legacyRoleFile, "utf-8"));
   }
 
   // Also hash plugin skills so template changes trigger fresh sessions
@@ -123,32 +128,55 @@ function findWorkspaceRef(name: string): string | null {
   }
 }
 
-function buildClaudeCmd(role: string, fresh: boolean, permissionMode: string, model?: string): string {
-  let cmd = fresh ? "claude" : "claude -c";
+function buildAgentCmd(
+  agentName: string,
+  registry: CapabilityRegistry,
+  role: string,
+  fresh: boolean,
+  permissionMode: string,
+  model?: string,
+): string {
+  const driver = registry.getDriver(agentName);
 
-  if (permissionMode === "acceptEdits") {
-    cmd += " --permission-mode acceptEdits";
-  } else if (permissionMode === "bypassPermissions") {
-    cmd += " --dangerously-skip-permissions";
+  // For Claude, handle fresh vs continue and permission mode specially
+  if (driver.name === "claude") {
+    let cmd = fresh ? "claude" : "claude -c";
+
+    if (permissionMode === "acceptEdits") {
+      cmd += " --permission-mode acceptEdits";
+    } else if (permissionMode === "bypassPermissions") {
+      cmd += " --dangerously-skip-permissions";
+    }
+
+    if (model) {
+      cmd += ` --model ${model}`;
+    }
+
+    const roleFile = path.join(TEMPLATES_DIR, `${role}.claude.md`);
+    const legacyRoleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
+    const actualRoleFile = fs.existsSync(roleFile) ? roleFile : (fs.existsSync(legacyRoleFile) ? legacyRoleFile : null);
+    if (actualRoleFile) {
+      cmd += ` --append-system-prompt-file ${actualRoleFile}`;
+    }
+
+    const pluginDir = path.join(TEMPLATES_DIR, "..", "plugin");
+    if (fs.existsSync(pluginDir)) {
+      cmd += ` --plugin-dir ${pluginDir}`;
+    }
+
+    return cmd;
   }
 
-  if (model) {
-    cmd += ` --model ${model}`;
-  }
-
-  // Append role-specific template (slim — detailed instructions are in cockpit skills)
-  const roleFile = path.join(TEMPLATES_DIR, `${role}.CLAUDE.md`);
-  if (fs.existsSync(roleFile)) {
-    cmd += ` --append-system-prompt-file ${roleFile}`;
-  }
-
-  // Load cockpit plugin for skills (captain-ops, command-ops, daily-log, etc.)
-  const pluginDir = path.join(TEMPLATES_DIR, "..", "plugin");
-  if (fs.existsSync(pluginDir)) {
-    cmd += ` --plugin-dir ${pluginDir}`;
-  }
-
-  return cmd;
+  // For non-Claude agents, use the driver's buildCommand
+  const roleFile = path.join(TEMPLATES_DIR, `${role}.${driver.templateSuffix}.md`);
+  return driver.buildCommand({
+    prompt: `You are a cockpit ${role}. Read your instructions from ${roleFile} and begin.`,
+    workdir: process.cwd(),
+    role: role as Role,
+    model,
+    autoApprove: true,
+    promptFile: fs.existsSync(roleFile) ? roleFile : undefined,
+  });
 }
 
 function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate = false, forceFresh = false, pinToTop = false, initialPrompt?: string): void {
@@ -218,6 +246,15 @@ export const launchCommand = new Command("launch")
   .action((project: string | undefined, opts: { fresh?: boolean; all?: boolean; reactor?: boolean }) => {
     const config = loadConfig();
 
+    // Build driver registry
+    const drivers: Record<string, AgentDriver> = {
+      claude: createClaudeDriver(),
+      codex: createCodexDriver(),
+      gemini: createGeminiDriver(),
+      aider: createAiderDriver(),
+    };
+    const registry = new CapabilityRegistry(drivers);
+
     function launchOne(
       workspaceName: string,
       role: string,
@@ -235,8 +272,10 @@ export const launchCommand = new Command("launch")
         }
       }
 
-      const model = config.defaults.models?.[role as keyof ModelRoutingConfig];
-      const claudeCmd = buildClaudeCmd(role, forceFresh, permissionMode, model);
+      const roleConfig = config.defaults.roles?.[role as keyof NonNullable<typeof config.defaults.roles>];
+      const agentName = roleConfig?.agent || "claude";
+      const model = roleConfig?.model || config.defaults.models?.[role as keyof ModelRoutingConfig];
+      const claudeCmd = buildAgentCmd(agentName, registry, role, forceFresh, permissionMode, model);
       recordSession(workspaceName, role);
 
       // Auto-trigger startup checklist

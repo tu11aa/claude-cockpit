@@ -70,7 +70,7 @@ function check(label: string, pass: boolean): boolean {
 
 export const doctorCommand = new Command("doctor")
   .description("Check system health and prerequisites")
-  .action(() => {
+  .action(async () => {
     console.log(chalk.bold("\nCockpit Doctor\n"));
 
     const results: boolean[] = [];
@@ -118,5 +118,46 @@ export const doctorCommand = new Command("doctor")
 
     if (results.some((r) => !r)) {
       process.exit(1);
+    }
+
+    // --- Agent Probes ---
+    console.log(chalk.bold("\nAgent Drivers\n"));
+
+    const { createClaudeDriver, createCodexDriver, createGeminiDriver, createAiderDriver, CapabilityRegistry } = await import("../drivers/index.js");
+
+    const agentDrivers = {
+      claude: createClaudeDriver(),
+      codex: createCodexDriver(),
+      gemini: createGeminiDriver(),
+      aider: createAiderDriver(),
+    };
+
+    const registry = new CapabilityRegistry(agentDrivers);
+    await registry.probeAll();
+
+    for (const [name, driver] of Object.entries(agentDrivers)) {
+      const probe = registry.getProbeResult(name);
+      if (!probe || !probe.installed) {
+        console.log(`  ${chalk.gray("○ SKIP")}  ${name} — not installed`);
+        continue;
+      }
+      const caps = probe.capabilities.join(", ");
+      console.log(`  ${chalk.green("✔ FOUND")} ${name} ${chalk.gray(probe.version)} — [${caps}]`);
+    }
+
+    // Show role assignments from config
+    if (config.defaults.roles) {
+      console.log(chalk.bold("\nRole Assignments\n"));
+      for (const [role, assignment] of Object.entries(config.defaults.roles)) {
+        const validation = registry.validateRole(assignment.agent, role as any);
+        const statusIcon = validation.allowed ? chalk.green("✔") : chalk.red("✘");
+        const warns = validation.missingPreferred.length > 0
+          ? chalk.yellow(` (missing preferred: ${validation.missingPreferred.join(", ")})`)
+          : "";
+        console.log(`  ${statusIcon} ${role}: ${assignment.agent}${assignment.model ? ` (${assignment.model})` : ""}${warns}`);
+        if (!validation.allowed && validation.reason) {
+          console.log(`    ${chalk.red(validation.reason)}`);
+        }
+      }
     }
   });
