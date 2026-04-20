@@ -40,7 +40,7 @@
       "trigger": {
         "checks": "failure"
       },
-      "action": "send-to-captain",
+      "action": "auto-fix-ci",
       "message": "CI failed on PR #{number} ({title}). Check logs and fix: {url}",
       "retries": 2,
       "escalate_after": "30m"
