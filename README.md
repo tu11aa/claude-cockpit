@@ -79,7 +79,7 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 - **Command** (Opus) — overseer, monitors all projects, spawns captains
 - **Captain** (Opus) — project leader, uses Agent Teams + git worktrees
 - **Crew** (Sonnet) — worker in a worktree, uses GSD for complex tasks
-- **Reactor** (Sonnet) — always-on GitHub event poller, auto-delegates to captains
+- **Reactor** (Sonnet) — always-on GitHub event poller, auto-delegates to captains (incl. auto-fix on CI failure, with escalation after max retries)
 
 ### Model Routing
 
