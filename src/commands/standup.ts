@@ -1,10 +1,10 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
 import chalk from "chalk";
 import matter from "gray-matter";
 import { loadConfig, resolveHome, type ProjectConfig } from "../config.js";
+import { readDailyLog, getGitCommits, iso, daysAgo } from "../lib/daily-logs.js";
 
 interface StatusFrontmatter {
   project?: string;
@@ -31,48 +31,7 @@ interface ProjectStandup {
 }
 
 function getDateStr(yesterday: boolean): string {
-  const d = new Date();
-  if (yesterday) d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function readDailyLog(spokeVault: string, dateStr: string): { content: string; blockers: string[] } | null {
-  const logFile = path.join(spokeVault, "daily-logs", `${dateStr}.md`);
-  if (!fs.existsSync(logFile)) return null;
-
-  const raw = fs.readFileSync(logFile, "utf-8");
-  const { content } = matter(raw);
-
-  // Extract blockers section
-  const blockers: string[] = [];
-  const blockerMatch = content.match(/## Blocked\n([\s\S]*?)(?=\n##|$)/);
-  if (blockerMatch) {
-    const lines = blockerMatch[1].trim().split("\n");
-    for (const line of lines) {
-      const trimmed = line.replace(/^[-*]\s*/, "").trim();
-      if (trimmed && trimmed !== "(none)" && trimmed !== "None") {
-        blockers.push(trimmed);
-      }
-    }
-  }
-
-  return { content, blockers };
-}
-
-function getGitCommits(projectPath: string, dateStr: string): string[] {
-  const resolved = resolveHome(projectPath);
-  if (!fs.existsSync(path.join(resolved, ".git"))) return [];
-
-  try {
-    const output = execSync(
-      `git -C "${resolved}" log --since="${dateStr} 00:00:00" --until="${dateStr} 23:59:59" --oneline --no-merges 2>/dev/null`,
-      { encoding: "utf-8", timeout: 5000 },
-    ).trim();
-    if (!output) return [];
-    return output.split("\n").map((l) => l.trim()).filter(Boolean);
-  } catch {
-    return [];
-  }
+  return iso(daysAgo(yesterday ? 1 : 0));
 }
 
 function getProjectStandup(name: string, project: ProjectConfig, dateStr: string): ProjectStandup {
