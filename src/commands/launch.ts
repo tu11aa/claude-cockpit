@@ -10,6 +10,8 @@ import { createClaudeDriver, createCodexDriver, createGeminiDriver, createAiderD
 import type { AgentDriver, Role } from "../drivers/types.js";
 import { RuntimeRegistry, createCmuxDriver } from "../runtimes/index.js";
 import type { RuntimeDriver } from "../runtimes/index.js";
+import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
+import { ensureSpokeLayout } from "../lib/vault-layout.js";
 
 const CMUX_APP = "/Applications/cmux.app";
 // Retained for the select-workspace / current-workspace calls that are not yet abstracted by RuntimeDriver.
@@ -308,10 +310,8 @@ export const launchCommand = new Command("launch")
         // Ensure spoke vault exists
         const spokePath = resolveHome(proj.spokeVault);
         if (!fs.existsSync(spokePath)) {
-          fs.mkdirSync(spokePath, { recursive: true });
-          for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates", "wiki", "wiki/pages"]) {
-            fs.mkdirSync(path.join(spokePath, sub), { recursive: true });
-          }
+          const spokeDriver = new WorkspaceRegistry({ obsidian: createObsidianDriver }).forProject(name, config);
+          await ensureSpokeLayout(spokeDriver);
           console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
         }
         console.log(chalk.bold(`\n  Captain: ${proj.captainName} (${name})`));
@@ -349,10 +349,8 @@ export const launchCommand = new Command("launch")
       // Ensure spoke vault exists
       const spokePath = resolveHome(proj.spokeVault);
       if (!fs.existsSync(spokePath)) {
-        fs.mkdirSync(spokePath, { recursive: true });
-        for (const sub of ["crew", "learnings", "daily-logs", "skills", "meta", "templates", "wiki", "wiki/pages"]) {
-          fs.mkdirSync(path.join(spokePath, sub), { recursive: true });
-        }
+        const spokeDriver = new WorkspaceRegistry({ obsidian: createObsidianDriver }).forProject(project, config);
+        await ensureSpokeLayout(spokeDriver);
         console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
       }
 

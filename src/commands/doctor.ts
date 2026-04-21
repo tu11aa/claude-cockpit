@@ -4,6 +4,7 @@ import fs from "node:fs";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
+import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 
 function commandExists(cmd: string): boolean {
   try {
@@ -118,6 +119,24 @@ export const doctorCommand = new Command("doctor")
       ));
     }
 
+    // Probe workspace providers
+    const workspaces = new WorkspaceRegistry({ obsidian: createObsidianDriver });
+    const hubDriver = workspaces.hub(config);
+    const hubProbe = await hubDriver.probe();
+    results.push(check(
+      `Workspace '${config.workspace ?? "obsidian"}' — hub reachable`,
+      hubProbe.installed && hubProbe.rootExists,
+    ));
+
+    for (const [name] of Object.entries(config.projects)) {
+      const spokeDriver = workspaces.forProject(name, config);
+      const probe = await spokeDriver.probe();
+      results.push(check(
+        `Workspace — spoke '${name}' reachable`,
+        probe.installed && probe.rootExists,
+      ));
+    }
+
     results.push(
       check(
         "Cockpit config exists",
@@ -125,12 +144,6 @@ export const doctorCommand = new Command("doctor")
           process.env.COCKPIT_CONFIG ||
             `${process.env.HOME}/.config/cockpit/config.json`,
         ),
-      ),
-    );
-    results.push(
-      check(
-        `Hub vault exists (${config.hubVault})`,
-        fs.existsSync(config.hubVault),
       ),
     );
 

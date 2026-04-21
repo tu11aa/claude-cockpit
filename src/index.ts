@@ -12,6 +12,7 @@ import { reactorCommand } from "./commands/reactor.js";
 import { standupCommand } from "./commands/standup.js";
 import { retroCommand } from "./commands/retro.js";
 import { runtimeCommand } from "./commands/runtime.js";
+import { workspaceCommand } from "./commands/workspace.js";
 
 const program = new Command();
 
@@ -31,5 +32,6 @@ program.addCommand(reactorCommand);
 program.addCommand(standupCommand);
 program.addCommand(retroCommand);
 program.addCommand(runtimeCommand);
+program.addCommand(workspaceCommand);
 
 program.parse();

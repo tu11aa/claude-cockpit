@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import matter from "gray-matter";
-import { loadConfig, resolveHome, type ProjectConfig } from "../config.js";
+import { loadConfig, resolveHome, type ProjectConfig, type CockpitConfig } from "../config.js";
 import {
   readDailyLog,
   parseSection,
@@ -13,6 +13,7 @@ import {
   iso,
   daysAgo,
 } from "../lib/daily-logs.js";
+import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 
 interface StatusFrontmatter {
   tasks_total?: number;
@@ -32,6 +33,7 @@ interface ProjectRetro {
   tasksInProgressNow: number;
 }
 
+// TODO(workspace): status.md still read via raw fs — migrate to workspace driver (see #24)
 function readStatus(spokeVault: string): StatusFrontmatter {
   const statusFile = path.join(spokeVault, "status.md");
   if (!fs.existsSync(statusFile)) return {};
@@ -55,12 +57,15 @@ function dedupe(items: string[]): string[] {
   return out;
 }
 
-function getProjectRetro(
+async function getProjectRetro(
   name: string,
   project: ProjectConfig,
   fromStr: string,
   toStr: string,
-): ProjectRetro {
+  registry: WorkspaceRegistry,
+  config: CockpitConfig,
+): Promise<ProjectRetro> {
+  const workspace = registry.forProject(name, config);
   const spokeVault = resolveHome(project.spokeVault);
   const status = readStatus(spokeVault);
 
@@ -70,7 +75,7 @@ function getProjectRetro(
   const decisions: string[] = [];
 
   for (const day of enumerateDays(new Date(fromStr), new Date(toStr))) {
-    const log = readDailyLog(spokeVault, day);
+    const log = await readDailyLog(workspace, day);
     if (!log) continue;
     shipped.push(...parseSection(log.content, "Completed"));
     inProgress.push(...parseSection(log.content, "In Progress"));
@@ -166,8 +171,9 @@ export const retroCommand = new Command("retro")
   .option("-p, --project <name>", "Retro for a single project")
   .option("-a, --all", "All projects (default)")
   .option("-r, --raw", "Raw markdown output (for pasting into Slack/Obsidian)")
-  .action((opts) => {
+  .action(async (opts) => {
     const config = loadConfig();
+    const registry = new WorkspaceRegistry({ obsidian: createObsidianDriver });
     const projects = Object.entries(config.projects);
 
     if (projects.length === 0) {
@@ -199,6 +205,8 @@ export const retroCommand = new Command("retro")
       targets = projects;
     }
 
-    const retros = targets.map(([name, proj]) => getProjectRetro(name, proj, fromStr, toStr));
+    const retros = await Promise.all(
+      targets.map(([name, proj]) => getProjectRetro(name, proj, fromStr, toStr, registry, config)),
+    );
     console.log(formatRetro(retros, fromStr, toStr, raw));
   });

@@ -1,8 +1,9 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
 import matter from "gray-matter";
 import { resolveHome } from "../config.js";
+import type { WorkspaceDriver } from "../workspaces/types.js";
 
 export function iso(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -32,11 +33,14 @@ export interface DailyLog {
   blockers: string[];
 }
 
-export function readDailyLog(spokeVault: string, dateStr: string): DailyLog | null {
-  const logFile = path.join(spokeVault, "daily-logs", `${dateStr}.md`);
-  if (!fs.existsSync(logFile)) return null;
+export async function readDailyLog(
+  workspace: WorkspaceDriver,
+  dateStr: string,
+): Promise<DailyLog | null> {
+  const relPath = `daily-logs/${dateStr}.md`;
+  if (!(await workspace.exists(relPath))) return null;
 
-  const raw = fs.readFileSync(logFile, "utf-8");
+  const raw = await workspace.read(relPath);
   const { content } = matter(raw);
 
   const blockers: string[] = [];
