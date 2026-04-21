@@ -86,6 +86,9 @@ runtimeCommand
     const config = loadConfig();
     const registry = buildRegistry();
     try {
+      if (opts.command && arg2 !== undefined) {
+        throw new Error("With --command, pass only the message (not a project name)");
+      }
       const target = opts.command ? undefined : arg1;
       const message = opts.command ? arg1 : arg2;
       if (!message) throw new Error("Message is required");
@@ -108,6 +111,9 @@ runtimeCommand
     const config = loadConfig();
     const registry = buildRegistry();
     try {
+      if (opts.command && arg2 !== undefined) {
+        throw new Error("With --command, pass only the key (not a project name)");
+      }
       const target = opts.command ? undefined : arg1;
       const key = opts.command ? arg1 : arg2;
       if (!key) throw new Error("Key is required");
