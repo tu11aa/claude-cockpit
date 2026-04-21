@@ -10,6 +10,7 @@ export interface ProjectConfig {
   host: string;
   group?: string;
   groupRole?: string;
+  runtime?: string;
 }
 
 export interface PermissionConfig {
@@ -102,6 +103,7 @@ export interface CockpitConfig {
   hubVault: string;
   projects: Record<string, ProjectConfig>;
   agents?: Record<string, AgentEntry>;
+  runtime?: string;
   defaults: {
     maxCrew: number;
     worktreeDir: string;
