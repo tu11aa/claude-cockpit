@@ -8,9 +8,12 @@ import chalk from "chalk";
 import { loadConfig, resolveHome, type ModelRoutingConfig } from "../config.js";
 import { createClaudeDriver, createCodexDriver, createGeminiDriver, createAiderDriver, CapabilityRegistry } from "../drivers/index.js";
 import type { AgentDriver, Role } from "../drivers/types.js";
+import { RuntimeRegistry, createCmuxDriver } from "../runtimes/index.js";
+import type { RuntimeDriver } from "../runtimes/index.js";
 
-const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const CMUX_APP = "/Applications/cmux.app";
+// Retained for the select-workspace / current-workspace calls that are not yet abstracted by RuntimeDriver.
+const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 const SESSIONS_PATH = path.join(os.homedir(), ".config", "cockpit", "sessions.json");
 
@@ -96,10 +99,6 @@ function recordSession(workspaceName: string, role: string): void {
   saveSessions(sessions);
 }
 
-function cmux(args: string): string {
-  return execSync(`"${CMUX_BIN}" ${args}`, { encoding: "utf-8" }).trim();
-}
-
 function isInsideCmux(): boolean {
   return !!process.env.CMUX_WORKSPACE_ID;
 }
@@ -111,21 +110,6 @@ function ensureCmuxReady(): void {
   execSync(`open "${CMUX_APP}"`, { stdio: "inherit" });
   console.log(chalk.bold("  Run `cockpit launch` from inside a cmux workspace.\n"));
   process.exit(0);
-}
-
-function findWorkspaceRef(name: string): string | null {
-  try {
-    const output = cmux("list-workspaces");
-    for (const line of output.split("\n")) {
-      const match = line.match(/(workspace:\d+)\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
-      if (match && match[2]?.trim() === name) {
-        return match[1];
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 function buildAgentCmd(
@@ -179,60 +163,59 @@ function buildAgentCmd(
   });
 }
 
-function launchWorkspace(name: string, claudeCmd: string, cwd?: string, navigate = false, forceFresh = false, pinToTop = false, initialPrompt?: string): void {
+async function launchWorkspace(
+  runtime: RuntimeDriver,
+  name: string,
+  agentCmd: string,
+  cwd?: string,
+  navigate = false,
+  forceFresh = false,
+  pinToTop = false,
+  initialPrompt?: string,
+): Promise<void> {
   ensureCmuxReady();
 
-  const existingRef = findWorkspaceRef(name);
-  if (existingRef && forceFresh) {
-    // Close stale workspace so a fresh one can be created
+  const existing = await runtime.status(name);
+  if (existing && forceFresh) {
     console.log(chalk.yellow(`  Closing stale workspace '${name}' for fresh start`));
-    try {
-      cmux(`close-workspace --workspace "${existingRef}"`);
-    } catch { /* may already be closing */ }
-  } else if (existingRef) {
+    await runtime.stop(existing.id);
+  } else if (existing) {
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
-    cmux(`select-workspace --workspace "${existingRef}"`);
+    // TODO(runtime): select/focus not yet abstracted; direct cmux call retained intentionally
+    execSync(`"${CMUX_BIN}" select-workspace --workspace "${existing.id}"`);
     return;
   }
 
-  {
-    let currentRef: string | undefined;
-    try {
-      const cur = cmux("current-workspace");
-      currentRef = cur.match(/workspace:\d+/)?.[0];
-    } catch { /* ignore */ }
+  let currentRef: string | undefined;
+  try {
+    // TODO(runtime): current-workspace not yet abstracted
+    const cur = execSync(`"${CMUX_BIN}" current-workspace`, { encoding: "utf-8" }).trim();
+    currentRef = cur.match(/workspace:\d+/)?.[0];
+  } catch { /* ignore */ }
 
-    const cwdFlag = cwd ? ` --cwd "${cwd}"` : "";
-    const output = cmux(`new-workspace --command "${claudeCmd}"${cwdFlag}`);
-    const wsId = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
+  const ref = await runtime.spawn({
+    name,
+    workdir: cwd ?? process.cwd(),
+    command: agentCmd,
+    pinToTop,
+  });
 
-    if (wsId) {
-      cmux(`rename-workspace --workspace "${wsId}" "${name}"`);
-      if (pinToTop) {
-        try {
-          cmux(`workspace-action --workspace "${wsId}" --action pin`);
-        } catch { /* pin is best-effort */ }
-      }
-    }
-
-    // Send initial prompt to trigger startup behavior
-    if (wsId && initialPrompt) {
-      // Small delay to let Claude Code initialize before sending prompt
-      setTimeout(() => {
-        try {
-          cmux(`send --workspace "${wsId}" "${initialPrompt.replace(/"/g, '\\"')}"`);
-        } catch { /* best-effort */ }
-      }, 3000);
-    }
-
-    if (navigate && wsId) {
-      cmux(`select-workspace --workspace "${wsId}"`);
-    } else if (currentRef) {
-      cmux(`select-workspace --workspace "${currentRef}"`);
-    }
-
-    console.log(chalk.green(`  ✔ Workspace '${name}' created`));
+  if (initialPrompt) {
+    // Small delay to let agent initialize before sending prompt
+    setTimeout(() => {
+      runtime.send(ref.id, initialPrompt).catch(() => { /* best-effort */ });
+    }, 3000);
   }
+
+  if (navigate) {
+    // TODO(runtime): select not yet abstracted
+    execSync(`"${CMUX_BIN}" select-workspace --workspace "${ref.id}"`);
+  } else if (currentRef) {
+    // TODO(runtime): select not yet abstracted
+    execSync(`"${CMUX_BIN}" select-workspace --workspace "${currentRef}"`);
+  }
+
+  console.log(chalk.green(`  ✔ Workspace '${name}' created`));
 }
 
 export const launchCommand = new Command("launch")
@@ -243,10 +226,10 @@ export const launchCommand = new Command("launch")
   .option("--fresh", "Start a new session instead of resuming the last one")
   .option("--all", "Launch command workspace + reactor + all captain workspaces")
   .option("--reactor", "Also launch the reactor workspace")
-  .action((project: string | undefined, opts: { fresh?: boolean; all?: boolean; reactor?: boolean }) => {
+  .action(async (project: string | undefined, opts: { fresh?: boolean; all?: boolean; reactor?: boolean }) => {
     const config = loadConfig();
 
-    // Build driver registry
+    // Build agent driver registry
     const drivers: Record<string, AgentDriver> = {
       claude: createClaudeDriver(),
       codex: createCodexDriver(),
@@ -255,14 +238,18 @@ export const launchCommand = new Command("launch")
     };
     const registry = new CapabilityRegistry(drivers);
 
-    function launchOne(
+    // Build runtime driver registry
+    const runtimes = new RuntimeRegistry({ cmux: createCmuxDriver() });
+
+    async function launchOne(
       workspaceName: string,
       role: string,
       cwd: string,
       permissionMode: string,
       navigate: boolean,
       pinToTop = false,
-    ): void {
+      projectName?: string,
+    ): Promise<void> {
       let forceFresh = !!opts.fresh;
       if (!forceFresh) {
         const auto = shouldStartFresh(workspaceName, role);
@@ -275,7 +262,7 @@ export const launchCommand = new Command("launch")
       const roleConfig = config.defaults.roles?.[role as keyof NonNullable<typeof config.defaults.roles>];
       const agentName = roleConfig?.agent || "claude";
       const model = roleConfig?.model || config.defaults.models?.[role as keyof ModelRoutingConfig];
-      const claudeCmd = buildAgentCmd(agentName, registry, role, forceFresh, permissionMode, model);
+      const agentCmd = buildAgentCmd(agentName, registry, role, forceFresh, permissionMode, model);
       recordSession(workspaceName, role);
 
       // Auto-trigger startup checklist
@@ -288,8 +275,12 @@ export const launchCommand = new Command("launch")
         initialPrompt = "Run your startup checklist: use the cockpit:reactor-ops skill, verify gh auth, read reactions.json, then start your poll loop.";
       }
 
+      const runtime = projectName
+        ? runtimes.forProject(projectName, config)
+        : runtimes.global(config);
+
       try {
-        launchWorkspace(workspaceName, claudeCmd, cwd, navigate, forceFresh, pinToTop, initialPrompt);
+        await launchWorkspace(runtime, workspaceName, agentCmd, cwd, navigate, forceFresh, pinToTop, initialPrompt);
       } catch (err) {
         console.error(chalk.red(`  ✘ Failed: ${(err as Error).message}`));
       }
@@ -303,12 +294,12 @@ export const launchCommand = new Command("launch")
 
       console.log(chalk.bold("\nLaunching all cockpit workspaces\n"));
       console.log(chalk.bold(`  Command: ${workspaceName}`));
-      launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
+      await launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
 
       // Launch reactor (after command, before captains)
       const reactorName = "⚡ reactor";
       console.log(chalk.bold(`\n  Reactor: ${reactorName}`));
-      launchOne(reactorName, "reactor", hubPath, config.defaults.permissions?.reactor || "default", false, true);
+      await launchOne(reactorName, "reactor", hubPath, config.defaults.permissions?.reactor || "default", false, true);
 
       for (const [name, proj] of Object.entries(config.projects)) {
         const projPath = resolveHome(proj.path);
@@ -322,7 +313,7 @@ export const launchCommand = new Command("launch")
           console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
         }
         console.log(chalk.bold(`\n  Captain: ${proj.captainName} (${name})`));
-        launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true);
+        await launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true, name);
       }
       console.log("");
     } else if (!project) {
@@ -332,12 +323,12 @@ export const launchCommand = new Command("launch")
       fs.mkdirSync(hubPath, { recursive: true });
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
-      launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
+      await launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
 
       if (opts.reactor) {
         const reactorName = "⚡ reactor";
         console.log(chalk.bold(`\nLaunching reactor: ${reactorName}\n`));
-        launchOne(reactorName, "reactor", hubPath, config.defaults.permissions?.reactor || "default", false, true);
+        await launchOne(reactorName, "reactor", hubPath, config.defaults.permissions?.reactor || "default", false, true);
       }
     } else {
       // Launch captain workspace for a project
@@ -368,6 +359,6 @@ export const launchCommand = new Command("launch")
           `\nLaunching captain workspace for '${project}' (${proj.captainName})\n`,
         ),
       );
-      launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true);
+      await launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true, project);
     }
   });
