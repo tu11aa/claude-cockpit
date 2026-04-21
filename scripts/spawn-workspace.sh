@@ -167,16 +167,28 @@ case "$AGENT" in
 esac
 
 # --- Handle existing workspace ---
-EXISTING_REF=$("$CMUX" list-workspaces 2>&1 | grep -F "$NAME" | awk '{print $1}' || true)
-if [ -n "$EXISTING_REF" ] && [ "$FRESH" = "true" ]; then
+# Find existing workspace via runtime abstraction
+EXISTING_JSON=$(cockpit runtime list --json 2>/dev/null || echo "[]")
+EXISTING_ID=$(echo "$EXISTING_JSON" | python3 -c "
+import json,sys
+try:
+    for w in json.load(sys.stdin):
+        if w.get('name') == '$NAME':
+            print(w['id']); break
+except: pass
+")
+
+if [ -n "$EXISTING_ID" ] && [ "$FRESH" = "true" ]; then
   echo "Closing stale workspace: $NAME"
-  "$CMUX" close-workspace --workspace "$EXISTING_REF" 2>/dev/null || true
-  EXISTING_REF=""
+  # select-workspace has no runtime abstraction yet — keeping direct cmux call here
+  "$CMUX" close-workspace --workspace "$EXISTING_ID" 2>/dev/null || true
+  EXISTING_ID=""
 fi
 
-if [ -n "$EXISTING_REF" ]; then
+if [ -n "$EXISTING_ID" ]; then
   echo "Workspace '$NAME' already exists — switching to it"
-  "$CMUX" select-workspace --workspace "$EXISTING_REF" 2>&1
+  # select-workspace has no runtime abstraction yet — keeping direct cmux call here
+  "$CMUX" select-workspace --workspace "$EXISTING_ID" 2>&1
   exit 0
 fi
 
