@@ -128,6 +128,8 @@ function buildAgentCmd(
 
     if (permissionMode === "acceptEdits") {
       cmd += " --permission-mode acceptEdits";
+    } else if (permissionMode === "auto") {
+      cmd += " --permission-mode auto";
     } else if (permissionMode === "bypassPermissions") {
       cmd += " --dangerously-skip-permissions";
     }
@@ -294,7 +296,7 @@ export const launchCommand = new Command("launch")
 
       console.log(chalk.bold("\nLaunching all cockpit workspaces\n"));
       console.log(chalk.bold(`  Command: ${workspaceName}`));
-      await launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
+      await launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "auto", true, true);
 
       // Launch reactor (after command, before captains)
       const reactorName = "⚡ reactor";
@@ -313,7 +315,7 @@ export const launchCommand = new Command("launch")
           console.log(chalk.cyan(`  ✔ Created spoke vault at ${spokePath}`));
         }
         console.log(chalk.bold(`\n  Captain: ${proj.captainName} (${name})`));
-        await launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true, name);
+        await launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "auto", false, true, name);
       }
       console.log("");
     } else if (!project) {
@@ -323,7 +325,7 @@ export const launchCommand = new Command("launch")
       fs.mkdirSync(hubPath, { recursive: true });
 
       console.log(chalk.bold(`\nLaunching command workspace: ${workspaceName}\n`));
-      await launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "default", true, true);
+      await launchOne(workspaceName, "command", hubPath, config.defaults.permissions?.command || "auto", true, true);
 
       if (opts.reactor) {
         const reactorName = "⚡ reactor";
@@ -359,6 +361,6 @@ export const launchCommand = new Command("launch")
           `\nLaunching captain workspace for '${project}' (${proj.captainName})\n`,
         ),
       );
-      await launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "acceptEdits", false, true, project);
+      await launchOne(proj.captainName, "captain", projPath, config.defaults.permissions?.captain || "auto", false, true, project);
     }
   });

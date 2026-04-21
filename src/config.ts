@@ -134,8 +134,8 @@ export function getDefaultConfig(): CockpitConfig {
       worktreeDir: ".worktrees",
       teammateMode: "in-process",
       permissions: {
-        command: "default",
-        captain: "acceptEdits",
+        command: "auto",
+        captain: "auto",
       },
       models: {
         command: "opus",
