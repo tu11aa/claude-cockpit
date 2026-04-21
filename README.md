@@ -78,6 +78,7 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 | `cockpit tracker create-issue <project> <title>` | Create an issue in the project's tracker repo |
 | `cockpit tracker merge-pr <project> <num>` | Enable auto-merge on a PR |
 | `cockpit tracker get-checks <project> <num>` | Print PR check runs |
+| `cockpit notify <message>` | Send a message to the user via the configured notifier |
 | `cockpit shutdown [project]` | Graceful shutdown |
 | `cockpit feedback` | Open opt-in feedback issue |
 
@@ -109,6 +110,10 @@ Vault storage (hub + per-project spokes) runs behind a pluggable **workspace dri
 
 Issue/PR operations run behind a pluggable **tracker driver** (currently only `github`). One-shot ops — create-issue, merge-pr, get-checks, get-run-log, list-issues — go through the driver instead of `gh` CLI directly. Bash scripts call `cockpit tracker <op>`. Polling stays provider-specific (`scripts/poll-github.sh`); future providers add their own poll scripts. Each project may override the global default via its `tracker` field. New backends (Linear, Jira, GitLab) are added as driver files in `src/trackers/` — see `docs/specs/2026-04-21-plugin-system-tracker-design.md`.
 
+### Notifier Abstraction
+
+User-facing notifications run behind a pluggable **notifier driver** (currently only `cmux`). Escalations, reactor alerts, and other "tell the user" events go through `cockpit notify <message>`. The default `CmuxNotifier` delegates to `cockpit runtime send --command` — the abstraction exists as a swap-point for future Slack/Discord/email/pager drivers. Notifier is global (no per-project override). See `docs/specs/2026-04-21-plugin-system-notifier-design.md`.
+
 ### Obsidian Vaults (Hub-and-Spoke)
 
 - **Hub vault** (`~/cockpit-hub`) — cross-project dashboard + hub wiki
@@ -138,6 +143,7 @@ Issue/PR operations run behind a pluggable **tracker driver** (currently only `g
   "runtime": "cmux",
   "workspace": "obsidian",
   "tracker": "github",
+  "notifier": "cmux",
   "projects": {
     "brove": {
       "path": "~/projects/brove",

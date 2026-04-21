@@ -6,6 +6,7 @@ import { loadConfig } from "../config.js";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
 import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 import { createGitHubDriver, TrackerRegistry } from "../trackers/index.js";
+import { createCmuxNotifier, NotifierRegistry } from "../notifiers/index.js";
 
 function commandExists(cmd: string): boolean {
   try {
@@ -150,6 +151,22 @@ export const doctorCommand = new Command("doctor")
         results.push(check(
           `Tracker '${name}' authenticated`,
           probe.authenticated,
+        ));
+      }
+    }
+
+    // Probe notifier providers
+    const notifiers = new NotifierRegistry({ cmux: createCmuxNotifier });
+    const notifierProbes = await notifiers.probeAll();
+    for (const [name, probe] of Object.entries(notifierProbes)) {
+      results.push(check(
+        `Notifier '${name}' installed`,
+        probe.installed,
+      ));
+      if (probe.installed) {
+        results.push(check(
+          `Notifier '${name}' reachable`,
+          probe.reachable,
         ));
       }
     }
