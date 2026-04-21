@@ -1,10 +1,9 @@
 #!/bin/bash
 # execute-reaction.sh — Execute a single reaction action
 # Usage: execute-reaction.sh <action.json>
-# Reads a single action object from file and executes it via cmux/gh.
+# Reads a single action object from file and executes it via cockpit runtime/gh.
 set -euo pipefail
 
-CMUX="/Applications/cmux.app/Contents/Resources/bin/cmux"
 CONFIG_FILE="${HOME}/.config/cockpit/config.json"
 ACTION_FILE="${1:?Usage: execute-reaction.sh <action.json>}"
 
@@ -47,51 +46,25 @@ print(rc['$key'])
 "
 }
 
-# Look up captain workspace name for the project
+# Look up captain workspace for the project via runtime abstraction
 get_captain_ws() {
   local proj="$1"
-  CAPTAIN_NAME=$(python3 -c "
-import json
-cfg = json.load(open('$CONFIG_FILE'))
-proj = cfg.get('projects', {}).get('$proj', {})
-print(proj.get('captainName', ''))
-")
-  if [ -z "$CAPTAIN_NAME" ]; then
-    echo "ERROR: No captain configured for project '$proj'" >&2
-    return 1
-  fi
-  # Find workspace ref
-  WS_REF=$("$CMUX" list-workspaces 2>&1 | grep -F "$CAPTAIN_NAME" | awk '{print $1}' || true)
-  if [ -z "$WS_REF" ]; then
-    echo "OFFLINE"
-  else
-    echo "$WS_REF"
-  fi
+  cockpit runtime status "$proj" 2>/dev/null
 }
 
 get_command_ws() {
-  COMMAND_NAME=$(python3 -c "
-import json
-cfg = json.load(open('$CONFIG_FILE'))
-print(cfg.get('commandName', '🏛️ command'))
-")
-  WS_REF=$("$CMUX" list-workspaces 2>&1 | grep -F "$COMMAND_NAME" | awk '{print $1}' || true)
-  echo "$WS_REF"
+  cockpit runtime status --command 2>/dev/null
 }
 
 case "$ACTION_TYPE" in
   delegate-to-captain)
-    WS=$(get_captain_ws "$PROJECT")
-    if [ "$WS" = "OFFLINE" ]; then
+    if ! get_captain_ws "$PROJECT" >/dev/null; then
       echo "⚠️  Captain for '$PROJECT' is offline. Spawning..."
-      # Spawn captain via cockpit launch
       cockpit launch "$PROJECT" 2>/dev/null || true
       sleep 5
-      WS=$(get_captain_ws "$PROJECT")
     fi
-    if [ -n "$WS" ] && [ "$WS" != "OFFLINE" ]; then
-      "$CMUX" send --workspace "$WS" "$MESSAGE"
-      "$CMUX" send-key --workspace "$WS" Enter
+
+    if cockpit runtime send "$PROJECT" "$MESSAGE"; then
       echo "✔ Delegated issue #${NUMBER} to ${PROJECT} captain"
     else
       echo "✘ Could not reach captain for '$PROJECT'" >&2
@@ -100,18 +73,13 @@ case "$ACTION_TYPE" in
     ;;
 
   send-to-captain)
-    WS=$(get_captain_ws "$PROJECT")
-    if [ -n "$WS" ] && [ "$WS" != "OFFLINE" ]; then
-      "$CMUX" send --workspace "$WS" "$MESSAGE"
-      "$CMUX" send-key --workspace "$WS" Enter
+    if get_captain_ws "$PROJECT" >/dev/null && cockpit runtime send "$PROJECT" "$MESSAGE"; then
       echo "✔ Sent message to ${PROJECT} captain: ${RULE}"
     else
       echo "⚠️  Captain for '$PROJECT' offline — escalating to command"
       # Fallback: send to command
-      CMD_WS=$(get_command_ws)
-      if [ -n "$CMD_WS" ]; then
-        "$CMUX" send --workspace "$CMD_WS" "⚠️ Reactor: ${PROJECT} captain offline. Pending action: ${MESSAGE}"
-        "$CMUX" send-key --workspace "$CMD_WS" Enter
+      if get_command_ws >/dev/null; then
+        cockpit runtime send --command "⚠️ Reactor: ${PROJECT} captain offline. Pending action: ${MESSAGE}" || true
       fi
     fi
     ;;
@@ -136,10 +104,7 @@ print(f\"{r.get('owner','')}/{r.get('repo','')}\")
     ;;
 
   escalate)
-    CMD_WS=$(get_command_ws)
-    if [ -n "$CMD_WS" ]; then
-      "$CMUX" send --workspace "$CMD_WS" "$MESSAGE"
-      "$CMUX" send-key --workspace "$CMD_WS" Enter
+    if get_command_ws >/dev/null && cockpit runtime send --command "$MESSAGE"; then
       echo "✔ Escalated to command: ${RULE}"
     else
       # Last resort: print to reactor log
@@ -167,10 +132,7 @@ else:
     ;;
 
   send-to-command)
-    CMD_WS=$(get_command_ws)
-    if [ -n "$CMD_WS" ]; then
-      "$CMUX" send --workspace "$CMD_WS" "$MESSAGE"
-      "$CMUX" send-key --workspace "$CMD_WS" Enter
+    if get_command_ws >/dev/null && cockpit runtime send --command "$MESSAGE"; then
       echo "✔ Sent to command: ${RULE}"
     fi
     ;;
@@ -182,11 +144,8 @@ else:
 
     if [ "$CURRENT" -ge "$MAX_RETRIES" ]; then
       # Escalate to command
-      CMD_WS=$(get_command_ws)
       ESC_MSG="🚨 CI failed ${CURRENT}× on ${PROJECT} PR #${NUMBER} — auto-fix exhausted (max ${MAX_RETRIES}). Needs manual triage: ${URL}"
-      if [ -n "$CMD_WS" ]; then
-        "$CMUX" send --workspace "$CMD_WS" "$ESC_MSG"
-        "$CMUX" send-key --workspace "$CMD_WS" Enter
+      if get_command_ws >/dev/null && cockpit runtime send --command "$ESC_MSG"; then
         echo "✔ Escalated PR #${NUMBER} to command (retries: ${CURRENT}/${MAX_RETRIES})"
       else
         echo "⚠️  Command offline. Escalation: ${ESC_MSG}"
@@ -243,17 +202,13 @@ ${LOG_TAIL:-(log unavailable)}
 
 Spawn a crew: checkout the PR branch, diagnose the failure, apply a fix, commit, and push. If the cause is unclear or outside the PR scope, reply here so I can escalate to command."
 
-    WS=$(get_captain_ws "$PROJECT")
-    if [ "$WS" = "OFFLINE" ]; then
+    if ! get_captain_ws "$PROJECT" >/dev/null; then
       echo "⚠️  Captain for '$PROJECT' offline. Spawning..."
       cockpit launch "$PROJECT" 2>/dev/null || true
       sleep 5
-      WS=$(get_captain_ws "$PROJECT")
     fi
 
-    if [ -n "$WS" ] && [ "$WS" != "OFFLINE" ]; then
-      "$CMUX" send --workspace "$WS" "$CAPTAIN_PROMPT"
-      "$CMUX" send-key --workspace "$WS" Enter
+    if cockpit runtime send "$PROJECT" "$CAPTAIN_PROMPT"; then
       NEW_COUNT=$(incr_retry_count "$RETRY_KEY")
       echo "✔ Auto-fix dispatched to ${PROJECT} captain (attempt ${NEW_COUNT}/${MAX_RETRIES})"
     else

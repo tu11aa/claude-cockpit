@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
+import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
 
 function commandExists(cmd: string): boolean {
   try {
@@ -77,7 +78,6 @@ export const doctorCommand = new Command("doctor")
 
     results.push(check("Claude Code installed", commandExists("claude")));
     results.push(check("Claude Code version >= 2.1.32", claudeVersionOk()));
-    results.push(check("cmux installed", commandExists("cmux") || fs.existsSync("/Applications/cmux.app")));
     results.push(check("Obsidian installed", commandExists("obsidian") || fs.existsSync("/Applications/Obsidian.app")));
     results.push(check("Node.js >= 18", nodeVersionOk()));
     results.push(
@@ -93,6 +93,31 @@ export const doctorCommand = new Command("doctor")
     results.push(check("Plugin: context7", pluginInstalled("context7@claude-plugins-official")));
 
     const config = loadConfig();
+
+    const runtimes = new RuntimeRegistry({ cmux: createCmuxDriver() });
+    const probeResults = await runtimes.probeAll();
+
+    // Global runtime must be installed
+    const globalRuntimeName = config.runtime ?? "cmux";
+    const globalProbe = probeResults[globalRuntimeName];
+    results.push(check(
+      `Runtime '${globalRuntimeName}' installed`,
+      !!globalProbe?.installed,
+    ));
+
+    // Any project-level override must also be installed
+    const overrides = new Set<string>();
+    for (const proj of Object.values(config.projects)) {
+      if (proj.runtime && proj.runtime !== globalRuntimeName) overrides.add(proj.runtime);
+    }
+    for (const runtimeName of overrides) {
+      const probe = probeResults[runtimeName];
+      results.push(check(
+        `Runtime '${runtimeName}' installed (project override)`,
+        !!probe?.installed,
+      ));
+    }
+
     results.push(
       check(
         "Cockpit config exists",

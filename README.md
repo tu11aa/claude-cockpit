@@ -69,6 +69,9 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 | `cockpit projects remove <name>` | Unregister a project |
 | `cockpit reactor check` | Run one reactor poll cycle |
 | `cockpit reactor status` | Show reactor state |
+| `cockpit runtime status <project>` | Check if a project's captain workspace is running |
+| `cockpit runtime send <project> <msg>` | Send a message to a captain workspace (auto-Enter) |
+| `cockpit runtime list` | List all workspaces from the active runtime |
 | `cockpit shutdown [project]` | Graceful shutdown |
 | `cockpit feedback` | Open opt-in feedback issue |
 
@@ -87,6 +90,10 @@ Each role runs on the optimal model for cost/quality tradeoff. Configured in `co
 - Command/Captain/Review: Opus (coordination + quality)
 - Crew/Reactor: Sonnet (execution)
 - Exploration: Haiku (cheap lookups)
+
+### Runtime Abstraction
+
+Workspaces run on a pluggable **runtime driver** (currently only `cmux`). Each project may override the global default via its `runtime` field. Bash scripts call `cockpit runtime <op>` to talk to the configured runtime instead of any specific binary. New runtimes (tmux, Docker, SSH) are added as driver files in `src/runtimes/` — see `docs/specs/2026-04-20-plugin-system-runtime-design.md`.
 
 ### Obsidian Vaults (Hub-and-Spoke)
 
@@ -114,12 +121,14 @@ Each role runs on the optimal model for cost/quality tradeoff. Configured in `co
 {
   "commandName": "command",
   "hubVault": "~/cockpit-hub",
+  "runtime": "cmux",
   "projects": {
     "brove": {
       "path": "~/projects/brove",
       "captainName": "brove-captain",
       "spokeVault": "~/cockpit-hub/spokes/brove",
-      "host": "local"
+      "host": "local",
+      "runtime": "cmux"
     }
   },
   "defaults": {
