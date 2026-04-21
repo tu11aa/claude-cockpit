@@ -14,6 +14,7 @@ import { retroCommand } from "./commands/retro.js";
 import { runtimeCommand } from "./commands/runtime.js";
 import { workspaceCommand } from "./commands/workspace.js";
 import { trackerCommand } from "./commands/tracker.js";
+import { notifyCommand } from "./commands/notify.js";
 
 const program = new Command();
 
@@ -35,5 +36,6 @@ program.addCommand(retroCommand);
 program.addCommand(runtimeCommand);
 program.addCommand(workspaceCommand);
 program.addCommand(trackerCommand);
+program.addCommand(notifyCommand);
 
 program.parse();
