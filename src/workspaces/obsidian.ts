@@ -7,6 +7,10 @@ import type {
   WorkspaceScope,
 } from "./types.js";
 
+// Rejects `../` escapes and absolute paths via lexical containment check.
+// Does NOT resolve symlinks — a symlink inside the vault pointing outside
+// will be followed by fs.* calls. Vault contents are trusted in the cockpit
+// threat model (user-owned, not untrusted input). Tracked in issue #25.
 function resolveInRoot(root: string, relative: string): string {
   const joined = path.resolve(root, relative);
   const normalized = path.resolve(root) + path.sep;

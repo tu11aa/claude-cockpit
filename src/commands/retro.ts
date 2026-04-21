@@ -33,6 +33,7 @@ interface ProjectRetro {
   tasksInProgressNow: number;
 }
 
+// TODO(workspace): status.md still read via raw fs — migrate to workspace driver (see #24)
 function readStatus(spokeVault: string): StatusFrontmatter {
   const statusFile = path.join(spokeVault, "status.md");
   if (!fs.existsSync(statusFile)) return {};

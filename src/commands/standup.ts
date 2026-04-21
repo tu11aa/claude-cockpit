@@ -38,6 +38,7 @@ async function getProjectStandup(
   config: CockpitConfig,
 ): Promise<ProjectStandup> {
   const workspace = registry.forProject(name, config);
+  // TODO(workspace): status.md still read via raw fs — migrate to workspace driver (see #24)
   const spokeVault = resolveHome(project.spokeVault);
   const statusFile = path.join(spokeVault, "status.md");
 
