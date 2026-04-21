@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import matter from "gray-matter";
-import { loadConfig, resolveHome, type ProjectConfig } from "../config.js";
+import { loadConfig, resolveHome, type ProjectConfig, type CockpitConfig } from "../config.js";
 import { readDailyLog, getGitCommits, iso, daysAgo } from "../lib/daily-logs.js";
+import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 
 interface StatusFrontmatter {
   project?: string;
@@ -15,11 +16,6 @@ interface StatusFrontmatter {
   tasks_completed?: number;
   tasks_in_progress?: number;
   tasks_pending?: number;
-}
-
-interface DailyLogFrontmatter {
-  date?: string;
-  project?: string;
 }
 
 interface ProjectStandup {
@@ -34,7 +30,14 @@ function getDateStr(yesterday: boolean): string {
   return iso(daysAgo(yesterday ? 1 : 0));
 }
 
-function getProjectStandup(name: string, project: ProjectConfig, dateStr: string): ProjectStandup {
+async function getProjectStandup(
+  name: string,
+  project: ProjectConfig,
+  dateStr: string,
+  registry: WorkspaceRegistry,
+  config: CockpitConfig,
+): Promise<ProjectStandup> {
+  const workspace = registry.forProject(name, config);
   const spokeVault = resolveHome(project.spokeVault);
   const statusFile = path.join(spokeVault, "status.md");
 
@@ -45,7 +48,7 @@ function getProjectStandup(name: string, project: ProjectConfig, dateStr: string
     } catch { /* empty */ }
   }
 
-  const log = readDailyLog(spokeVault, dateStr);
+  const log = await readDailyLog(workspace, dateStr);
   const gitCommits = getGitCommits(project.path, dateStr);
 
   return {
@@ -148,8 +151,9 @@ export const standupCommand = new Command("standup")
   .option("-a, --all", "Show all projects (default)")
   .option("-y, --yesterday", "Show yesterday's standup instead of today")
   .option("-r, --raw", "Output raw markdown (for pasting into Slack/chat)")
-  .action((opts) => {
+  .action(async (opts) => {
     const config = loadConfig();
+    const registry = new WorkspaceRegistry({ obsidian: createObsidianDriver });
     const projects = Object.entries(config.projects);
 
     if (projects.length === 0) {
@@ -172,7 +176,9 @@ export const standupCommand = new Command("standup")
       targets = projects;
     }
 
-    const standups = targets.map(([name, proj]) => getProjectStandup(name, proj, dateStr));
+    const standups = await Promise.all(
+      targets.map(([name, proj]) => getProjectStandup(name, proj, dateStr, registry, config)),
+    );
     const output = formatStandup(standups, dateStr, raw);
     console.log(output);
   });
