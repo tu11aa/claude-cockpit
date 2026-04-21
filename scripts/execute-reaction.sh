@@ -77,8 +77,11 @@ case "$ACTION_TYPE" in
       echo "✔ Sent message to ${PROJECT} captain: ${RULE}"
     else
       echo "⚠️  Captain for '$PROJECT' offline — escalating to command"
-      # Fallback: send to command
-      cockpit notify "⚠️ Reactor: ${PROJECT} captain offline. Pending action: ${MESSAGE}" || true
+      if cockpit notify "⚠️ Reactor: ${PROJECT} captain offline. Pending action: ${MESSAGE}"; then
+        echo "✔ Escalated to command"
+      else
+        echo "⚠️  Command also offline. Escalation: ${MESSAGE}" >&2
+      fi
     fi
     ;;
 
@@ -122,6 +125,8 @@ else:
   send-to-command)
     if cockpit notify "$MESSAGE"; then
       echo "✔ Sent to command: ${RULE}"
+    else
+      echo "⚠️  Send-to-command failed: ${RULE}" >&2
     fi
     ;;
 

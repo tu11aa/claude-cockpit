@@ -22,6 +22,8 @@ export function createCmuxNotifier(_scope: NotifierScope): NotifierDriver {
         if (code === "ENOENT") {
           return { installed: false, reachable: false };
         }
+        // Any non-ENOENT error: cockpit shim crashed, workspace down, or
+        // config unreadable all collapse to "installed but not reachable".
         return { installed: true, reachable: false };
       }
     },
