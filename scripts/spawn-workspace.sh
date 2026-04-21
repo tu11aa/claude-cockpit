@@ -116,6 +116,8 @@ case "$AGENT" in
 
     if [ "$PERM_MODE" = "acceptEdits" ]; then
       AGENT_CMD="${AGENT_CMD} --permission-mode acceptEdits"
+    elif [ "$PERM_MODE" = "auto" ]; then
+      AGENT_CMD="${AGENT_CMD} --permission-mode auto"
     elif [ "$PERM_MODE" = "bypassPermissions" ]; then
       AGENT_CMD="${AGENT_CMD} --dangerously-skip-permissions"
     fi

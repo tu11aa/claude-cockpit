@@ -22,8 +22,8 @@ fi
 "$CMUX" rename-tab --surface "$PANE_REF" --workspace "$CAPTAIN_WS" "🔧 $CREW_NAME" 2>/dev/null || true
 
 # Start Claude Code in the crew pane with the task
-# Use --permission-mode acceptEdits so crew can work
-CLAUDE_CMD="claude --permission-mode acceptEdits -p \"You are a crew member (🔧 ${CREW_NAME}). ${TASK} When done, summarize what you did and what branch/PR was created.\""
+# Use --permission-mode auto so crew can work without repeated prompts
+CLAUDE_CMD="claude --permission-mode auto -p \"You are a crew member (🔧 ${CREW_NAME}). ${TASK} When done, summarize what you did and what branch/PR was created.\""
 "$CMUX" send --workspace "$CAPTAIN_WS" --surface "$PANE_REF" "$CLAUDE_CMD" 2>&1
 "$CMUX" send-key --workspace "$CAPTAIN_WS" --surface "$PANE_REF" Enter 2>&1
 
