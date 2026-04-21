@@ -85,20 +85,10 @@ case "$ACTION_TYPE" in
     ;;
 
   auto-merge)
-    # Get repo info from reactions config
-    REPO_INFO=$(python3 -c "
-import json
-with open('${HOME}/.config/cockpit/reactions.json') as f:
-    cfg = json.load(f)
-repos = cfg.get('github', {}).get('repos', {})
-r = repos.get('$PROJECT', {})
-print(f\"{r.get('owner','')}/{r.get('repo','')}\")
-")
-    if [ -n "$REPO_INFO" ] && [ "$REPO_INFO" != "/" ]; then
-      gh pr merge "$NUMBER" --repo "$REPO_INFO" --"$MERGE_METHOD" --auto 2>&1
-      echo "✔ Auto-merge enabled for PR #${NUMBER} on ${REPO_INFO} (${MERGE_METHOD})"
+    if cockpit tracker merge-pr "$PROJECT" "$NUMBER" --method "$MERGE_METHOD"; then
+      echo "✔ Auto-merge enabled for PR #${NUMBER} on ${PROJECT} (${MERGE_METHOD})"
     else
-      echo "✘ No repo configured for project '$PROJECT'" >&2
+      echo "✘ Merge failed for PR #${NUMBER} on ${PROJECT}" >&2
       exit 1
     fi
     ;;
@@ -153,39 +143,32 @@ else:
       exit 0
     fi
 
-    # Resolve repo for log fetching
-    REPO_INFO=$(python3 -c "
-import json
-with open('${HOME}/.config/cockpit/reactions.json') as f:
-    cfg = json.load(f)
-repos = cfg.get('github', {}).get('repos', {})
-r = repos.get('$PROJECT', {})
-print(f\"{r.get('owner','')}/{r.get('repo','')}\")
-")
-    if [ -z "$REPO_INFO" ] || [ "$REPO_INFO" = "/" ]; then
-      echo "✘ No repo configured for project '$PROJECT'" >&2
-      exit 1
-    fi
-
-    # Fetch failed check names + log tail for the PR's head commit
-    FAIL_SUMMARY=$(gh pr checks "$NUMBER" --repo "$REPO_INFO" 2>/dev/null | awk -F'\t' '$2=="fail"{print "- "$1" ("$4")"}' | head -20 || true)
-    FAIL_RUN_ID=$(gh pr checks "$NUMBER" --repo "$REPO_INFO" --json name,state,link 2>/dev/null \
-      | python3 -c "
-import json, sys, re
+    # Fetch failed check summary + run ID from tracker
+    CHECKS_JSON=$(cockpit tracker get-checks "$PROJECT" "$NUMBER" --json 2>/dev/null || echo "[]")
+    FAIL_SUMMARY=$(echo "$CHECKS_JSON" | python3 -c "
+import json, sys
 try:
     checks = json.load(sys.stdin)
     for c in checks:
-        if c.get('state') == 'FAILURE':
-            m = re.search(r'/runs/(\d+)', c.get('link',''))
-            if m:
-                print(m.group(1)); break
+        if c.get('state') == 'failure':
+            print(f\"- {c.get('name','')} ({c.get('link','')})\")
+except Exception:
+    pass
+" 2>/dev/null | head -20 || true)
+
+    FAIL_RUN_ID=$(echo "$CHECKS_JSON" | python3 -c "
+import json, sys
+try:
+    for c in json.load(sys.stdin):
+        if c.get('state') == 'failure' and c.get('runId'):
+            print(c['runId']); break
 except Exception:
     pass
 " 2>/dev/null || true)
 
     LOG_TAIL=""
     if [ -n "$FAIL_RUN_ID" ]; then
-      LOG_TAIL=$(gh run view "$FAIL_RUN_ID" --repo "$REPO_INFO" --log-failed 2>/dev/null | tail -100 || true)
+      LOG_TAIL=$(cockpit tracker get-run-log "$PROJECT" "$FAIL_RUN_ID" --tail 100 2>/dev/null || true)
     fi
 
     # Build captain prompt
