@@ -19,10 +19,15 @@ export class TrackerRegistry {
     if (!proj) throw new Error(`Project '${projectName}' not found`);
     const name = proj.tracker ?? config.tracker ?? DEFAULT_TRACKER;
     const repoConfig = reactions.github?.repos?.[projectName] ?? {};
-    return this.get(name)({
-      owner: (repoConfig as { owner?: string }).owner,
-      repo: (repoConfig as { repo?: string }).repo,
-    });
+    const owner = (repoConfig as { owner?: string }).owner;
+    const repo = (repoConfig as { repo?: string }).repo;
+    if (!owner || !repo) {
+      throw new Error(
+        `No tracker repo configured for project '${projectName}' ` +
+        `(set reactions.json github.repos.${projectName}.owner/repo)`,
+      );
+    }
+    return this.get(name)({ owner, repo });
   }
 
   get(name: string): TrackerFactory {

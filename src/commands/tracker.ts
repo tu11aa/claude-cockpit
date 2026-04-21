@@ -60,10 +60,12 @@ trackerCommand
     const config = loadConfig();
     const reactions = loadReactions();
     try {
+      if (opts.method !== "merge" && opts.method !== "squash" && opts.method !== "rebase") {
+        throw new Error(`Invalid merge method '${opts.method}'. Allowed: merge, squash, rebase`);
+      }
       const driver = resolveDriver(buildRegistry(), config, reactions, project);
-      const method = (opts.method === "merge" || opts.method === "rebase" ? opts.method : "squash") as "merge" | "squash" | "rebase";
-      await driver.mergePullRequest(Number(numberStr), method);
-      console.log(chalk.green(`✔ Merge enabled for PR #${numberStr} (${method})`));
+      await driver.mergePullRequest(Number(numberStr), opts.method);
+      console.log(chalk.green(`✔ Merge enabled for PR #${numberStr} (${opts.method})`));
     } catch (err) {
       console.error(chalk.red((err as Error).message));
       process.exit(1);

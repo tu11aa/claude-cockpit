@@ -62,7 +62,7 @@ describe("TrackerRegistry", () => {
       tracker: "linear",
       projects: { brove: { path: "/p", captainName: "c", spokeVault: "~/s", host: "local" } },
     });
-    const reactions = baseReactions();
+    const reactions = baseReactions({ github: { repos: { brove: { owner: "o", repo: "r" } } } });
     const driver = registry.forProject("brove", config, reactions);
     expect(driver.name).toBe("linear");
   });
@@ -79,7 +79,7 @@ describe("TrackerRegistry", () => {
         brove: { path: "/p", captainName: "c", spokeVault: "~/s", host: "local", tracker: "jira" },
       },
     });
-    const reactions = baseReactions();
+    const reactions = baseReactions({ github: { repos: { brove: { owner: "o", repo: "r" } } } });
     const driver = registry.forProject("brove", config, reactions);
     expect(driver.name).toBe("jira");
   });
@@ -90,8 +90,18 @@ describe("TrackerRegistry", () => {
       tracker: "unknown",
       projects: { brove: { path: "/p", captainName: "c", spokeVault: "~/s", host: "local" } },
     });
-    const reactions = baseReactions();
+    const reactions = baseReactions({ github: { repos: { brove: { owner: "o", repo: "r" } } } });
     expect(() => registry.forProject("brove", config, reactions)).toThrowError(/unknown/i);
+  });
+
+  it("throws with actionable message when repo config is missing", () => {
+    const registry = new TrackerRegistry({ github: stubFactory("github") });
+    const config = baseConfig({
+      projects: { brove: { path: "/p", captainName: "c", spokeVault: "~/s", host: "local" } },
+    });
+    const reactions = baseReactions();
+    expect(() => registry.forProject("brove", config, reactions))
+      .toThrowError(/No tracker repo configured for project 'brove'/);
   });
 
   it("throws for unknown project", () => {
