@@ -11,6 +11,7 @@ export interface ProjectConfig {
   group?: string;
   groupRole?: string;
   runtime?: string;
+  workspace?: string;
 }
 
 export interface PermissionConfig {
@@ -104,6 +105,7 @@ export interface CockpitConfig {
   projects: Record<string, ProjectConfig>;
   agents?: Record<string, AgentEntry>;
   runtime?: string;
+  workspace?: string;
   defaults: {
     maxCrew: number;
     worktreeDir: string;
