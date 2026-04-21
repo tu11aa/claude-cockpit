@@ -78,9 +78,7 @@ case "$ACTION_TYPE" in
     else
       echo "⚠️  Captain for '$PROJECT' offline — escalating to command"
       # Fallback: send to command
-      if get_command_ws >/dev/null; then
-        cockpit runtime send --command "⚠️ Reactor: ${PROJECT} captain offline. Pending action: ${MESSAGE}" || true
-      fi
+      cockpit notify "⚠️ Reactor: ${PROJECT} captain offline. Pending action: ${MESSAGE}" || true
     fi
     ;;
 
@@ -94,7 +92,7 @@ case "$ACTION_TYPE" in
     ;;
 
   escalate)
-    if get_command_ws >/dev/null && cockpit runtime send --command "$MESSAGE"; then
+    if cockpit notify "$MESSAGE"; then
       echo "✔ Escalated to command: ${RULE}"
     else
       # Last resort: print to reactor log
@@ -122,7 +120,7 @@ else:
     ;;
 
   send-to-command)
-    if get_command_ws >/dev/null && cockpit runtime send --command "$MESSAGE"; then
+    if cockpit notify "$MESSAGE"; then
       echo "✔ Sent to command: ${RULE}"
     fi
     ;;
@@ -135,7 +133,7 @@ else:
     if [ "$CURRENT" -ge "$MAX_RETRIES" ]; then
       # Escalate to command
       ESC_MSG="🚨 CI failed ${CURRENT}× on ${PROJECT} PR #${NUMBER} — auto-fix exhausted (max ${MAX_RETRIES}). Needs manual triage: ${URL}"
-      if get_command_ws >/dev/null && cockpit runtime send --command "$ESC_MSG"; then
+      if cockpit notify "$ESC_MSG"; then
         echo "✔ Escalated PR #${NUMBER} to command (retries: ${CURRENT}/${MAX_RETRIES})"
       else
         echo "⚠️  Command offline. Escalation: ${ESC_MSG}"
