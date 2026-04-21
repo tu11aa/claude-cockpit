@@ -123,7 +123,7 @@ export const DEFAULT_CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 
 export function getDefaultConfig(): CockpitConfig {
   return {
-    commandName: "\u{1F3DB}\u{FE0F} command",
+    commandName: "command",
     hubVault: path.join(os.homedir(), "cockpit-hub"),
     projects: {},
     agents: {
