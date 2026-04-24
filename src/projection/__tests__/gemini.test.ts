@@ -4,9 +4,9 @@ import type { ProjectionSource } from "../types.js";
 import { MARKER_START, MARKER_END } from "../marker.js";
 
 const fsMock = vi.hoisted(() => ({
-  mkdir: vi.fn(async () => {}),
-  readFile: vi.fn(async () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); }),
-  writeFile: vi.fn(async () => {}),
+  mkdir: vi.fn(),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
 }));
 vi.mock("node:fs/promises", () => fsMock);
 
