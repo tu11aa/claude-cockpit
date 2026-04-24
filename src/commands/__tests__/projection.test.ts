@@ -133,4 +133,30 @@ describe("projectionCommand", () => {
     const [, , opts] = emitMock.mock.calls[0];
     expect(opts?.dryRun).toBe(true);
   });
+
+  it("emit --scope user with --project throws validation error", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await projectionCommand.parseAsync(["node", "projection", "emit", "--scope", "user", "--project", "brove"]);
+    } catch {}
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const errOutput = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(errOutput).toMatch(/cannot be combined/i);
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it("emit --project unknown-name throws fatal error", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await projectionCommand.parseAsync(["node", "projection", "emit", "--project", "nope"]);
+    } catch {}
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const errOutput = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(errOutput).toMatch(/unknown project/i);
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+  });
 });

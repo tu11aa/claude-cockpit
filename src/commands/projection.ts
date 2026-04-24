@@ -23,6 +23,13 @@ type Opts = {
   all?: boolean;
 };
 
+function parseScope(v: string): "user" | "project" {
+  if (v !== "user" && v !== "project") {
+    throw new Error("--scope must be 'user' or 'project'");
+  }
+  return v;
+}
+
 function buildRegistry(): ProjectionRegistry {
   return new ProjectionRegistry({
     cursor: createCursorEmitter,
@@ -37,10 +44,18 @@ function resolveTargets(cfg: ReturnType<typeof loadConfig>, opts: Opts): string[
 }
 
 async function runEmit(opts: Opts & { dryRun?: boolean }) {
+  if (opts.scope === "user" && opts.project) {
+    throw new Error("--scope user cannot be combined with --project");
+  }
+  if (opts.all && (opts.scope || opts.project)) {
+    throw new Error("--all cannot be combined with --scope or --project");
+  }
+
   const cfg = loadConfig();
   const registry = buildRegistry();
   const workspace: WorkspaceDriver = createObsidianDriver({ root: process.cwd() });
   const targets = resolveTargets(cfg, opts);
+  for (const name of targets) registry.get(name); // throws on unknown target
 
   const emittedCount = { written: 0, skipped: 0 };
 
@@ -85,6 +100,11 @@ async function runEmit(opts: Opts & { dryRun?: boolean }) {
     for (const projectName of projectNames) {
       const proj = cfg.projects[projectName];
       if (!proj) {
+        if (opts.project) {
+          throw new Error(
+            `Unknown project '${projectName}'. Available: ${Object.keys(cfg.projects).join(", ") || "(none)"}`,
+          );
+        }
         console.error(chalk.yellow(`⚠ unknown project: ${projectName}`));
         continue;
       }
@@ -115,12 +135,7 @@ export const projectionCommand = new Command("projection").description(
 projectionCommand
   .command("emit")
   .description("Emit projections to disk")
-  .option("--scope <scope>", "user or project", (v) => {
-    if (v !== "user" && v !== "project") {
-      throw new Error("--scope must be 'user' or 'project'");
-    }
-    return v;
-  })
+  .option("--scope <scope>", "user or project", parseScope)
   .option("--project <name>", "managed project name")
   .option("--target <name>", "single target (cursor, codex, gemini)")
   .option("--all", "emit user-level + every managed project")
@@ -136,7 +151,7 @@ projectionCommand
 projectionCommand
   .command("diff")
   .description("Preview changes without writing")
-  .option("--scope <scope>", "user or project")
+  .option("--scope <scope>", "user or project", parseScope)
   .option("--project <name>", "managed project name")
   .option("--target <name>", "single target (cursor, codex, gemini)")
   .option("--all", "dry-run across user-level + every managed project")
