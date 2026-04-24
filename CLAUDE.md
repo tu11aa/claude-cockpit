@@ -99,3 +99,26 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Project Direction: Multi-Agent
+
+Cockpit is a **multi-agent orchestration layer**, not a Claude-Code-only tool. Claude Code is the reference implementation today; Codex, Cursor, Gemini CLI, and Aider are supported (or in progress) through the runtime driver abstraction and the upcoming cross-agent projection layer (issue #31).
+
+When working on cockpit:
+- Prefer **`AGENTS.md`** as the canonical instruction format. `CLAUDE.md` is becoming a thin wrapper.
+- When adding agent-facing features, ask: *"does this work for non-Claude agents too?"* If not, file a follow-up issue to generalize it.
+- Don't add Claude-only surface area without a migration path. The four plugin slots (runtime / workspace / tracker / notifier) exist specifically to avoid this.
+- Skills in `plugin/skills/` are portable markdown — Claude Code reads them via the Skill tool; other agents read them via `AGENTS.md` inclusion.
+
+Full direction statement: [`docs/specs/2026-04-24-multi-agent-direction.md`](docs/specs/2026-04-24-multi-agent-direction.md).
+
+## Coding Discipline: Karpathy Principles
+
+Every coding task in this repo (captain, crew, and direct edits) follows [`plugin/skills/karpathy-principles/SKILL.md`](plugin/skills/karpathy-principles/SKILL.md):
+
+1. **Think before coding** — surface assumptions and tradeoffs; ask if ambiguous
+2. **Simplicity first** — no speculative abstractions, no impossible-case error handling
+3. **Surgical changes** — every changed line traces to the request; no drive-by refactors
+4. **Goal-driven execution** — define verifiable success criteria before implementing
+
+These complement (do not replace) `superpowers:test-driven-development`.

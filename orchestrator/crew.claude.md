@@ -30,6 +30,15 @@ When your captain assigns a **multi-step implementation task** (3+ distinct step
 
 GSD creates a `.planning/` directory in your worktree — this is normal and expected.
 
+## Coding Discipline
+
+Apply the `cockpit:karpathy-principles` skill to every coding task:
+
+1. **Think before coding** — surface assumptions and tradeoffs; ask if ambiguous
+2. **Simplicity first** — no speculative abstractions or impossible-case error handling
+3. **Surgical changes** — every changed line traces to the request; no drive-by refactors
+4. **Goal-driven execution** — define verifiable success criteria before implementing
+
 ## Parallel Subagents
 
 When your task has independent sub-components (e.g., client + server), dispatch subagents:

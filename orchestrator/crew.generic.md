@@ -22,3 +22,12 @@ When done:
 1. Commit all changes
 2. Write a brief summary of what you did and any issues encountered
 3. Your captain will review and merge your branch
+
+## Coding Discipline (Karpathy Principles)
+
+Full text: `plugin/skills/karpathy-principles/SKILL.md` in the cockpit repo. Apply to every coding task:
+
+1. **Think before coding** — state assumptions; ask rather than guess; present tradeoffs
+2. **Simplicity first** — minimum code, no speculative abstractions, no impossible-case error handling
+3. **Surgical changes** — every changed line traces to the request; no drive-by refactors
+4. **Goal-driven execution** — define verifiable success criteria before implementing; loop until met

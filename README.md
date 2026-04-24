@@ -1,6 +1,8 @@
 # claude-cockpit
 
-Multi-project agent orchestration for Claude Code. One command session controls everything.
+Multi-project orchestration layer for coding agents. One command session controls everything.
+
+> **Direction:** Cockpit is moving to support all major coding agents — Claude Code, Codex, Cursor, Gemini CLI, Aider — not just Claude Code. Claude Code is the reference implementation today; other agents land through the plugin system's driver abstractions and the upcoming cross-agent projection layer ([#31](https://github.com/tu11aa/claude-cockpit/issues/31)). See [`docs/specs/2026-04-24-multi-agent-direction.md`](docs/specs/2026-04-24-multi-agent-direction.md).
 
 ## How It Works
 
@@ -174,6 +176,27 @@ User-facing notifications run behind a pluggable **notifier driver** (currently 
   }
 }
 ```
+
+## Supported Agents
+
+| Agent | Status | Notes |
+|---|---|---|
+| Claude Code | ✅ Shipping | Reference implementation; reads `CLAUDE.md`, Skill tool, MCP via settings.json |
+| Codex CLI | 🚧 Driver only | Runtime driver (feature branch); instructions via `AGENTS.md` needed |
+| Cursor | 🚧 Driver only | Runtime driver; rules via `.cursor/rules/*.mdc` via [#31](https://github.com/tu11aa/claude-cockpit/issues/31) |
+| Gemini CLI | 🚧 Driver only | Runtime driver; instructions via `GEMINI.md` |
+| Aider | 📋 Planned | `CONVENTIONS.md`; MCP via external config |
+
+Cross-agent config sync (one canonical source → agent-specific formats) is tracked in [#31](https://github.com/tu11aa/claude-cockpit/issues/31).
+
+## Inspirations
+
+- **[Andrej Karpathy](https://x.com/karpathy/status/2015883857489522876)** — coding principles baked into every captain/crew role ([`plugin/skills/karpathy-principles/SKILL.md`](plugin/skills/karpathy-principles/SKILL.md))
+- **[forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)** — reference packaging for the four principles (MIT)
+- **[Multica](https://github.com/multica-ai/multica)** — validated the multi-agent runtime + skill-compounding direction
+- **[AGENTS.md](https://agents.md/)** — convergence point for cross-agent instructions
+- **[OpenSpace](https://github.com/openspacelabs/openspace)** — self-improving learnings loop (record → capture → fix → mark-useful)
+- **[ComposioHQ](https://github.com/ComposioHQ/composio)** — tool/skill portability across agents
 
 ## License
 

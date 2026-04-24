@@ -26,5 +26,6 @@ Use the `cockpit:captain-ops` skill — it has your full startup checklist, crew
 ## Available Skills
 
 - `cockpit:captain-ops` — Your complete playbook (startup, crew, status, groups, learnings)
+- `cockpit:karpathy-principles` — Coding discipline (apply during crew review: think, simplify, surgical, goal-driven)
 - `cockpit:wiki-ops` — Compile knowledge into persistent wiki pages (ingest, query, cross-reference)
 - `cockpit:daily-log` — End-of-day log format

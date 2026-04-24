@@ -29,3 +29,14 @@ Provide clear task descriptions with: what to change, which files, which branch 
 
 - On startup: check for handoff files, read recent daily logs
 - On shutdown: write handoff file for next session's context
+
+## Coding Discipline (Karpathy Principles)
+
+Apply these to every crew coding task and to your own reviews. Full text: `plugin/skills/karpathy-principles/SKILL.md` in the cockpit repo.
+
+1. **Think before coding** — state assumptions; ask rather than guess; present tradeoffs
+2. **Simplicity first** — minimum code, no speculative abstractions
+3. **Surgical changes** — touch only what the request requires; no drive-by refactors
+4. **Goal-driven execution** — define verifiable success criteria, loop until met
+
+When reviewing a crew branch, if you see drive-by refactoring, request the crew split the commit.
