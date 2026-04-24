@@ -81,6 +81,9 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 | `cockpit tracker merge-pr <project> <num>` | Enable auto-merge on a PR |
 | `cockpit tracker get-checks <project> <num>` | Print PR check runs |
 | `cockpit notify <message>` | Send a message to the user via the configured notifier |
+| `cockpit projection emit [--scope user\|project] [--project <name>] [--target <name>] [--all]` | Emit cockpit rules + skills to Cursor/Codex/Gemini config files |
+| `cockpit projection diff [same flags]` | Preview projection changes without writing |
+| `cockpit projection list` | Show registered projection targets and their destinations |
 | `cockpit shutdown [project]` | Graceful shutdown |
 | `cockpit feedback` | Open opt-in feedback issue |
 
@@ -115,6 +118,10 @@ Issue/PR operations run behind a pluggable **tracker driver** (currently only `g
 ### Notifier Abstraction
 
 User-facing notifications run behind a pluggable **notifier driver** (currently only `cmux`). Escalations, reactor alerts, and other "tell the user" events go through `cockpit notify <message>`. The default `CmuxNotifier` delegates to `cockpit runtime send --command` — the abstraction exists as a swap-point for future Slack/Discord/email/pager drivers. Notifier is global (no per-project override). See `docs/specs/2026-04-21-plugin-system-notifier-design.md`.
+
+### Projection (Cross-Agent Config Sync)
+
+Cockpit rules (Karpathy principles, captain-ops) and per-project AGENTS.md emit to each supported agent's canonical path via `cockpit projection emit`. User-level projection pushes cockpit's skills to `~/.cursor/rules/cockpit-global.mdc`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`. Project-level projection pushes a managed project's own `AGENTS.md` into `{project}/CLAUDE.md`, `{project}/.cursor/rules/cockpit.mdc`, `{project}/GEMINI.md` — zero cockpit-global content leaks into the project repo. Shared files use `<!-- cockpit:start --> ... <!-- cockpit:end -->` markers; dedicated files overwrite. See `docs/specs/2026-04-24-plugin-system-projection-design.md`.
 
 ### Obsidian Vaults (Hub-and-Spoke)
 
@@ -182,9 +189,9 @@ User-facing notifications run behind a pluggable **notifier driver** (currently 
 | Agent | Status | Notes |
 |---|---|---|
 | Claude Code | ✅ Shipping | Reference implementation; reads `CLAUDE.md`, Skill tool, MCP via settings.json |
-| Codex CLI | 🚧 Driver only | Runtime driver (feature branch); instructions via `AGENTS.md` needed |
-| Cursor | 🚧 Driver only | Runtime driver; rules via `.cursor/rules/*.mdc` via [#31](https://github.com/tu11aa/claude-cockpit/issues/31) |
-| Gemini CLI | 🚧 Driver only | Runtime driver; instructions via `GEMINI.md` |
+| Codex CLI | ✅ via cockpit projection | Runtime driver (feature branch); instructions via `AGENTS.md` needed |
+| Cursor | ✅ via cockpit projection | Runtime driver; rules via `.cursor/rules/*.mdc` via [#31](https://github.com/tu11aa/claude-cockpit/issues/31) |
+| Gemini CLI | ✅ via cockpit projection | Runtime driver; instructions via `GEMINI.md` |
 | Aider | 📋 Planned | `CONVENTIONS.md`; MCP via external config |
 
 Cross-agent config sync (one canonical source → agent-specific formats) is tracked in [#31](https://github.com/tu11aa/claude-cockpit/issues/31).
