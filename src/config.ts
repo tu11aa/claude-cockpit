@@ -109,6 +109,9 @@ export interface CockpitConfig {
   workspace?: string;
   tracker?: string;
   notifier?: string;
+  projection?: {
+    targets?: string[];
+  };
   defaults: {
     maxCrew: number;
     worktreeDir: string;
