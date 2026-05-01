@@ -1,12 +1,20 @@
 import { Command } from "commander";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
 import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 import { createGitHubDriver, TrackerRegistry } from "../trackers/index.js";
 import { createCmuxNotifier, NotifierRegistry } from "../notifiers/index.js";
+import {
+  createCursorEmitter,
+  createCodexEmitter,
+  createGeminiEmitter,
+  ProjectionRegistry,
+} from "../projection/index.js";
 
 function commandExists(cmd: string): boolean {
   try {
@@ -169,6 +177,28 @@ export const doctorCommand = new Command("doctor")
           probe.reachable,
         ));
       }
+    }
+
+    // Probe projection targets
+    console.log(chalk.bold("\nProjection"));
+    const projectionRegistry = new ProjectionRegistry({
+      cursor: createCursorEmitter,
+      codex: createCodexEmitter,
+      gemini: createGeminiEmitter,
+    });
+    for (const name of projectionRegistry.list()) {
+      const emitter = projectionRegistry.get(name);
+      const [userDest] = emitter.destinations("user");
+      if (!userDest) continue;
+      const dir = path.dirname(userDest.path);
+      let status: string;
+      try {
+        await stat(dir);
+        status = chalk.green("✓ dir writable");
+      } catch {
+        status = chalk.yellow("! dir missing (will be created on emit)");
+      }
+      console.log(`  ${name.padEnd(10)} ${userDest.path} — ${status}`);
     }
 
     results.push(
