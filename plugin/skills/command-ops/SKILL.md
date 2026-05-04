@@ -44,19 +44,34 @@ Match to `~/.config/cockpit/config.json`.
 ```
 **CRITICAL:** Match the EXACT `captainName` from config. `Brove` ≠ `⚓ brove-captain`.
 
-### 3. Spawn captain if missing
+### 3. Freshness gate (run BEFORE deciding to reuse)
+A name match is **not** sufficient — the workspace may be holding a session from a previous day. Check `sessions.json` against today before reusing:
+```bash
+TODAY=$(date +%Y-%m-%d)
+LAST=$(python3 -c "import json; d=json.load(open('$HOME/.config/cockpit/sessions.json')); print(d.get('workspaces',{}).get('{captainName}',{}).get('lastLaunched',''))" 2>/dev/null)
+[ "$LAST" = "$TODAY" ] && echo "fresh" || echo "stale"
+```
+- `fresh` → reuse the existing workspace, proceed to step 5.
+- `stale` (or no entry) → close the existing workspace, then go to step 4 to respawn so `spawn-workspace.sh` runs its `↻ new day — starting fresh session` path:
+  ```bash
+  /Applications/cmux.app/Contents/Resources/bin/cmux close-workspace --workspace "workspace:N"
+  ```
+
+Never skip this gate when a workspace was found by name — that's how stale captains get reused.
+
+### 4. Spawn captain (missing or stale)
 ```bash
 ~/.config/cockpit/scripts/spawn-workspace.sh "{captainName}" "{projectPath}"
 ```
-Wait a few seconds, then `list-workspaces` again to get its ref.
+Wait a few seconds, then `list-workspaces` again to get its ref. Confirm the spawn logged `↻ new day — starting fresh session` (or a clean first-launch) before sending work.
 
-### 4. Send the task
+### 5. Send the task
 ```bash
 /Applications/cmux.app/Contents/Resources/bin/cmux send --workspace "workspace:N" "Task description with all context"
 /Applications/cmux.app/Contents/Resources/bin/cmux send-key --workspace "workspace:N" Enter
 ```
 
-### 5. Report back
+### 6. Report back
 "Delegated to {captainName}."
 
 ## Checking Status
