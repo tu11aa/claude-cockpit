@@ -1,9 +1,8 @@
 import { Command } from "commander";
-import fs from "node:fs";
-import path from "node:path";
 import chalk from "chalk";
 import matter from "gray-matter";
 import { loadConfig } from "../config.js";
+import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 
 interface StatusFrontmatter {
   project?: string;
@@ -42,9 +41,10 @@ function progressBar(completed: number, total: number): string {
 
 export const statusCommand = new Command("status")
   .description("Show status of all projects from spoke vault status files")
-  .action(() => {
+  .action(async () => {
     const config = loadConfig();
     const projects = Object.entries(config.projects);
+    const registry = new WorkspaceRegistry({ obsidian: createObsidianDriver });
 
     if (projects.length === 0) {
       console.log(chalk.yellow("\nNo projects registered. Use: cockpit projects add <name> <path>\n"));
@@ -60,18 +60,16 @@ export const statusCommand = new Command("status")
     console.log(chalk.dim("  " + "─".repeat(85)));
 
     for (const [name, project] of projects) {
-      const statusFile = path.join(project.spokeVault, "status.md");
+      const workspace = registry.forProject(name, config);
 
-      if (!fs.existsSync(statusFile)) {
-        console.log(
-          `  ${name.padEnd(18)} ${chalk.dim("no status.md")}`,
-        );
+      if (!(await workspace.exists("status.md"))) {
+        console.log(`  ${name.padEnd(18)} ${chalk.dim("no status.md")}`);
         continue;
       }
 
       let fm: StatusFrontmatter = {};
       try {
-        const raw = fs.readFileSync(statusFile, "utf-8");
+        const raw = await workspace.read("status.md");
         fm = matter(raw).data as StatusFrontmatter;
       } catch {
         console.log(`  ${name.padEnd(18)} ${chalk.red("error reading status.md")}`);
@@ -82,9 +80,7 @@ export const statusCommand = new Command("status")
         fm.captain_session === "active"
           ? chalk.green("●")
           : chalk.dim("○");
-      // Pad the plain name first, then append the colored indicator so chalk escapes don't break alignment
       const captainDisplay = `${project.captainName.padEnd(11)} ${sessionIndicator}`;
-
       const crew = String(fm.active_crew ?? 0).padEnd(6);
       const progress = progressBar(
         fm.tasks_completed ?? 0,

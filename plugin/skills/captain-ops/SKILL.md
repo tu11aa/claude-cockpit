@@ -23,7 +23,12 @@ The handoff file is auto-deleted after reading. Use this as your primary context
 4. Check `{spokeVault}/daily-logs/` — read the most recent log if one exists.
 5. Check `{spokeVault}/learnings/` — **selectively** load relevant learnings (see "Selective Loading" section below). Do NOT read all files — grep by task keywords and tags.
 6. Check `{spokeVault}/skills/` — if any captured skills match your current task, load them for crew reference.
-7. Write active status:
+7. Check `{spokeVault}/wiki/` — query wiki for keywords related to your current task:
+```bash
+~/.config/cockpit/scripts/wiki-query.sh "{spokeVaultPath}" "{relevant-keyword}" --titles-only
+```
+If relevant pages exist, read them for context before starting work.
+8. Write active status:
 ```bash
 ~/.config/cockpit/scripts/write-status.sh "{spokeVaultPath}" "captain_session" "active" "Captain session started"
 ```
@@ -79,21 +84,44 @@ mcp__task-master-ai__expand_task(id: "1", projectRoot: "{projectPath}")
 
 **You MUST spawn a crew member for ANY coding task** — even a one-line change. You are a coordinator. You plan, delegate, review, and merge. You do NOT write code yourself.
 
-Use the **Agent tool** with `team_name` and `isolation: "worktree"`:
+Use the **Agent tool** with `team_name`, `isolation: "worktree"`, and the appropriate `model`:
 ```
 Agent(
   team_name: "{project}-crew",
   name: "🔧 {project}-crew-{task}",
   isolation: "worktree",
+  model: "sonnet",
   prompt: "You are a crew member on {project}. Your task: {description}. Branch from: {branch}. Files involved: {files}."
+)
+```
+
+For **review tasks**, use Opus for higher quality:
+```
+Agent(
+  team_name: "{project}-crew",
+  name: "🔍 {project}-review-{task}",
+  model: "opus",
+  prompt: "Review the changes on branch {branch}. Check for: correctness, edge cases, test coverage, style."
+)
+```
+
+For **exploration/research**, use Haiku for cost efficiency:
+```
+Agent(
+  name: "explore-{topic}",
+  model: "haiku",
+  prompt: "Quickly find: {question}. Return a concise answer."
 )
 ```
 
 - Do **NOT** manually run `git worktree add`
 - Do **NOT** edit source code yourself — always delegate to crew
 - Respect `maxCrew` limit
+- **Model routing**: `sonnet` for coding, `opus` for reviews, `haiku` for exploration
 - Give clear context: what to change, which files, which branch to base from
 - Crew members **persist** — you can send follow-up instructions via `SendMessage(to: "🔧 {project}-crew-{task}", message: "...")`
+- **For complex multi-step tasks** (3+ steps, multiple files): tell crew to use GSD — add to the prompt: "This is a complex task. Use `/gsd:plan-phase` and `/gsd:execute-phase` for wave-based execution with fresh context per step."
+- **For simple tasks**: don't mention GSD — crew will handle it directly
 
 ## Task Coordination
 
@@ -153,7 +181,8 @@ CMD_WS=$(/Applications/cmux.app/Contents/Resources/bin/cmux list-workspaces 2>&1
 **When the user says "wrap up", "end of day", or "shutdown", OR when you have no more tasks:**
 
 1. First, write the daily log (use `cockpit:daily-log` skill).
-2. Then, write a handoff file so tomorrow's session can resume instantly:
+2. Review today's learnings — if any were marked useful or represent compiled knowledge, promote to wiki pages using `cockpit:wiki-ops`.
+3. Then, write a handoff file so tomorrow's session can resume instantly:
 
 ```bash
 ~/.config/cockpit/scripts/write-handoff.sh "{spokeVaultPath}" '{
@@ -191,6 +220,19 @@ Record after tasks complete, unexpected issues, or discovered patterns:
 ```
 - Categories: `workflow`, `template`, `convention`, `bug`, `insight`
 - Tags: comma-separated keywords for selective loading (e.g., `cairo,escrow,pvp`)
+
+## Wiki Compilation
+
+After completing tasks or discovering notable patterns, compile knowledge into the wiki. Use the `cockpit:wiki-ops` skill for full instructions.
+
+1. **After each task**: If you learned how something works, create/update a wiki page
+2. **During session shutdown**: Review today's learnings — promote useful ones to wiki pages
+3. **Before starting work**: Query the wiki for relevant context:
+```bash
+~/.config/cockpit/scripts/wiki-query.sh "{spokeVaultPath}" "{task-keywords}"
+```
+
+**Learnings vs Wiki**: Learnings are raw observations (quick to record). Wiki pages are compiled, structured knowledge (worth maintaining). Promote a learning when it's been useful 2+ times or represents how a system works.
 
 ## Selective Loading (on session start)
 

@@ -10,6 +10,7 @@ import {
   DEFAULT_CONFIG_PATH,
   resolveHome,
 } from "../config.js";
+import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 
 function findPackageRoot(): string {
   let dir = path.dirname(new URL(import.meta.url).pathname);
@@ -42,6 +43,20 @@ export const initCommand = new Command("init")
     const configDir = path.join(os.homedir(), ".config", "cockpit");
 
     console.log(chalk.bold("\nCockpit Init\n"));
+
+    // Verify the default workspace provider is registered (cockpit ships obsidian;
+    // if user already has a config pointing to an unknown provider, bail early)
+    const registry = new WorkspaceRegistry({ obsidian: createObsidianDriver });
+    try {
+      if (fs.existsSync(DEFAULT_CONFIG_PATH)) {
+        const existing = JSON.parse(fs.readFileSync(DEFAULT_CONFIG_PATH, "utf-8"));
+        const wsName = existing.workspace ?? "obsidian";
+        registry.get(wsName);
+      }
+    } catch (err) {
+      console.log(chalk.red(`  ✘ ${(err as Error).message}`));
+      return;
+    }
 
     // 1. Create config
     if (fs.existsSync(DEFAULT_CONFIG_PATH)) {
@@ -89,7 +104,7 @@ export const initCommand = new Command("init")
     if (fs.existsSync(orchestratorDir)) {
       fs.mkdirSync(templatesTarget, { recursive: true });
       for (const file of fs.readdirSync(orchestratorDir)) {
-        if (file.endsWith(".CLAUDE.md")) {
+        if (file.endsWith(".claude.md") || file.endsWith(".generic.md") || file.endsWith(".CLAUDE.md")) {
           const src = path.join(orchestratorDir, file);
           const dest = path.join(templatesTarget, file);
           fs.copyFileSync(src, dest);

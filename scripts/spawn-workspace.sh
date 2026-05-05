@@ -37,7 +37,9 @@ except: print('')
 
   # Check template + skills hash
   if [ "$FRESH" = "false" ]; then
-    CURRENT_HASH=$(cat "${TEMPLATES_DIR}/${ROLE}.CLAUDE.md" "${HOME}/.config/cockpit/plugin/skills"/*/SKILL.md 2>/dev/null | shasum -a 256 | cut -c1-16)
+    ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.claude.md"
+    [ ! -f "$ROLE_FILE" ] && ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.CLAUDE.md"
+    CURRENT_HASH=$(cat "$ROLE_FILE" "${HOME}/.config/cockpit/plugin/skills"/*/SKILL.md 2>/dev/null | shasum -a 256 | cut -c1-16)
     STORED_HASH=$(python3 -c "
 import json
 try:
@@ -55,7 +57,9 @@ else
 fi
 
 # --- Record session ---
-CURRENT_HASH=$(cat "${TEMPLATES_DIR}/${ROLE}.CLAUDE.md" "${HOME}/.config/cockpit/plugin/skills"/*/SKILL.md 2>/dev/null | shasum -a 256 | cut -c1-16)
+ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.claude.md"
+[ ! -f "$ROLE_FILE" ] && ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.CLAUDE.md"
+CURRENT_HASH=$(cat "$ROLE_FILE" "${HOME}/.config/cockpit/plugin/skills"/*/SKILL.md 2>/dev/null | shasum -a 256 | cut -c1-16)
 python3 -c "
 import json, os
 path = '$SESSIONS_FILE'
@@ -67,13 +71,6 @@ os.makedirs(os.path.dirname(path), exist_ok=True)
 json.dump(data, open(path, 'w'), indent=2)
 " 2>/dev/null
 
-# --- Build claude command ---
-if [ "$FRESH" = "true" ]; then
-  CLAUDE_CMD="claude"
-else
-  CLAUDE_CMD="claude -c"
-fi
-
 # Read permission mode from config
 PERM_MODE=$(python3 -c "
 import json
@@ -84,53 +81,136 @@ try:
 except: print('default')
 " 2>/dev/null)
 
-if [ "$PERM_MODE" = "acceptEdits" ]; then
-  CLAUDE_CMD="${CLAUDE_CMD} --permission-mode acceptEdits"
-elif [ "$PERM_MODE" = "bypassPermissions" ]; then
-  CLAUDE_CMD="${CLAUDE_CMD} --dangerously-skip-permissions"
-fi
+# Read agent and model from roles config (new format), fall back to old models config
+AGENT=$(python3 -c "
+import json
+try:
+    cfg = json.load(open('${HOME}/.config/cockpit/config.json'))
+    roles = cfg.get('defaults', {}).get('roles', {})
+    role_cfg = roles.get('$ROLE', {})
+    print(role_cfg.get('agent', 'claude'))
+except: print('claude')
+" 2>/dev/null)
 
-# Append role template (slim — detailed instructions are in cockpit skills)
-ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.CLAUDE.md"
-if [ -f "$ROLE_FILE" ]; then
-  CLAUDE_CMD="${CLAUDE_CMD} --append-system-prompt-file ${ROLE_FILE}"
-fi
+MODEL=$(python3 -c "
+import json
+try:
+    cfg = json.load(open('${HOME}/.config/cockpit/config.json'))
+    roles = cfg.get('defaults', {}).get('roles', {})
+    role_cfg = roles.get('$ROLE', {})
+    model = role_cfg.get('model', '')
+    if not model:
+        model = cfg.get('defaults', {}).get('models', {}).get('$ROLE', '')
+    print(model)
+except: print('')
+" 2>/dev/null)
 
-# Load cockpit plugin for skills (captain-ops, command-ops, daily-log, etc.)
-PLUGIN_DIR="${HOME}/.config/cockpit/plugin"
-if [ -d "$PLUGIN_DIR" ]; then
-  CLAUDE_CMD="${CLAUDE_CMD} --plugin-dir ${PLUGIN_DIR}"
-fi
+# --- Build agent command based on resolved agent ---
+case "$AGENT" in
+  claude)
+    if [ "$FRESH" = "true" ]; then
+      AGENT_CMD="claude"
+    else
+      AGENT_CMD="claude -c"
+    fi
+
+    if [ "$PERM_MODE" = "acceptEdits" ]; then
+      AGENT_CMD="${AGENT_CMD} --permission-mode acceptEdits"
+    elif [ "$PERM_MODE" = "auto" ]; then
+      AGENT_CMD="${AGENT_CMD} --permission-mode auto"
+    elif [ "$PERM_MODE" = "bypassPermissions" ]; then
+      AGENT_CMD="${AGENT_CMD} --dangerously-skip-permissions"
+    fi
+
+    if [ -n "$MODEL" ]; then
+      AGENT_CMD="${AGENT_CMD} --model ${MODEL}"
+    fi
+
+    ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.claude.md"
+    [ ! -f "$ROLE_FILE" ] && ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.CLAUDE.md"
+    if [ -f "$ROLE_FILE" ]; then
+      AGENT_CMD="${AGENT_CMD} --append-system-prompt-file ${ROLE_FILE}"
+    fi
+
+    PLUGIN_DIR="${HOME}/.config/cockpit/plugin"
+    if [ -d "$PLUGIN_DIR" ]; then
+      AGENT_CMD="${AGENT_CMD} --plugin-dir ${PLUGIN_DIR}"
+    fi
+    ;;
+
+  codex)
+    ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.generic.md"
+    AGENT_CMD="codex exec --json --full-auto"
+    if [ -f "$ROLE_FILE" ]; then
+      AGENT_CMD="${AGENT_CMD} -p \"Read instructions from ${ROLE_FILE} and begin.\""
+    fi
+    ;;
+
+  gemini)
+    ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.generic.md"
+    AGENT_CMD="gemini --yolo"
+    if [ -f "$ROLE_FILE" ]; then
+      AGENT_CMD="${AGENT_CMD} -p \"Read instructions from ${ROLE_FILE} and begin.\""
+    fi
+    ;;
+
+  aider)
+    ROLE_FILE="${TEMPLATES_DIR}/${ROLE}.generic.md"
+    AGENT_CMD="aider --yes --no-stream"
+    if [ -n "$MODEL" ]; then
+      AGENT_CMD="${AGENT_CMD} --model ${MODEL}"
+    fi
+    ;;
+
+  *)
+    echo "ERROR: Unknown agent '${AGENT}' for role '${ROLE}'"
+    exit 1
+    ;;
+esac
 
 # --- Handle existing workspace ---
-EXISTING_REF=$("$CMUX" list-workspaces 2>&1 | grep -F "$NAME" | awk '{print $1}' || true)
-if [ -n "$EXISTING_REF" ] && [ "$FRESH" = "true" ]; then
+# Find existing workspace via runtime abstraction
+EXISTING_JSON=$(cockpit runtime list --json 2>/dev/null || echo "[]")
+EXISTING_ID=$(echo "$EXISTING_JSON" | python3 -c "
+import json,sys
+try:
+    for w in json.load(sys.stdin):
+        if w.get('name') == '$NAME':
+            print(w['id']); break
+except: pass
+")
+
+if [ -n "$EXISTING_ID" ] && [ "$FRESH" = "true" ]; then
   echo "Closing stale workspace: $NAME"
-  "$CMUX" close-workspace --workspace "$EXISTING_REF" 2>/dev/null || true
-  EXISTING_REF=""
+  # select-workspace has no runtime abstraction yet — keeping direct cmux call here
+  "$CMUX" close-workspace --workspace "$EXISTING_ID" 2>/dev/null || true
+  EXISTING_ID=""
 fi
 
-if [ -n "$EXISTING_REF" ]; then
+if [ -n "$EXISTING_ID" ]; then
   echo "Workspace '$NAME' already exists — switching to it"
-  "$CMUX" select-workspace --workspace "$EXISTING_REF" 2>&1
+  # select-workspace has no runtime abstraction yet — keeping direct cmux call here
+  "$CMUX" select-workspace --workspace "$EXISTING_ID" 2>&1
   exit 0
 fi
 
 # --- Spawn new workspace ---
 CURRENT=$("$CMUX" current-workspace 2>&1 | awk '{print $1}')
-NEW_UUID=$("$CMUX" new-workspace --command "$CLAUDE_CMD" --cwd "$CWD" 2>&1 | awk '{print $2}')
+NEW_UUID=$("$CMUX" new-workspace --command "$AGENT_CMD" --cwd "$CWD" 2>&1 | awk '{print $2}')
 "$CMUX" rename-workspace --workspace "$NEW_UUID" "$NAME" 2>&1
 if [ "$ROLE" = "command" ] || [ "$ROLE" = "captain" ] || [ "$ROLE" = "reactor" ]; then
   "$CMUX" workspace-action --workspace "$NEW_UUID" --action pin 2>/dev/null || true
 fi
-# Send initial prompt to trigger startup checklist
-if [ "$ROLE" = "captain" ]; then
-  (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:captain-ops skill, complete all startup steps, then report ready." 2>/dev/null) &
-elif [ "$ROLE" = "command" ]; then
-  (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:command-ops skill, complete your daily briefing, then report ready." 2>/dev/null) &
-elif [ "$ROLE" = "reactor" ]; then
-  (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:reactor-ops skill, verify gh auth, read reactions.json, then start your poll loop." 2>/dev/null) &
+# Send initial prompt to trigger startup checklist (Claude agents only)
+if [ "$AGENT" = "claude" ]; then
+  if [ "$ROLE" = "captain" ]; then
+    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:captain-ops skill, complete all startup steps, then report ready." 2>/dev/null) &
+  elif [ "$ROLE" = "command" ]; then
+    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:command-ops skill, complete your daily briefing, then report ready." 2>/dev/null) &
+  elif [ "$ROLE" = "reactor" ]; then
+    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:reactor-ops skill, verify gh auth, read reactions.json, then start your poll loop." 2>/dev/null) &
+  fi
 fi
 
 "$CMUX" select-workspace --workspace "$CURRENT" 2>&1
-echo "Spawned workspace: $NAME at $CWD (role: $ROLE, fresh: $FRESH)"
+echo "Spawned workspace: $NAME at $CWD (role: $ROLE, agent: $AGENT, fresh: $FRESH)"

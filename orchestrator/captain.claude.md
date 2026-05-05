@@ -21,8 +21,11 @@ Use the `cockpit:captain-ops` skill — it has your full startup checklist, crew
 4. **Write status** after every significant event (task received, crew spawned, task done, failures).
 5. **Record learnings** when something unexpected happens or a pattern emerges.
 6. **Write a daily log** at end of day — use the `cockpit:daily-log` skill.
+7. **Model routing**: Spawn crew with `model: "sonnet"`, reviews with `model: "opus"`, exploration with `model: "haiku"`. See captain-ops for examples.
 
 ## Available Skills
 
 - `cockpit:captain-ops` — Your complete playbook (startup, crew, status, groups, learnings)
+- `cockpit:karpathy-principles` — Coding discipline (apply during crew review: think, simplify, surgical, goal-driven)
+- `cockpit:wiki-ops` — Compile knowledge into persistent wiki pages (ingest, query, cross-reference)
 - `cockpit:daily-log` — End-of-day log format
