@@ -70,6 +70,7 @@ See `obsidian/plugins.md` for Dataview, Templater setup.
 | `cockpit projects add <name> <path>` | Register a project |
 | `cockpit projects remove <name>` | Unregister a project |
 | `cockpit reactor check` | Run one reactor poll cycle |
+| `cockpit reactor poll-status [--json]` | Run one auto-status poll across all registered projects (writes `{spokeVault}/status.md`). |
 | `cockpit reactor status` | Show reactor state |
 | `cockpit runtime status <project>` | Check if a project's captain workspace is running |
 | `cockpit runtime send <project> <msg>` | Send a message to a captain workspace (auto-Enter) |
@@ -135,7 +136,7 @@ Cockpit rules (Karpathy principles, captain-ops) and per-project AGENTS.md emit 
 
 ### Knowledge System (opt-in writes)
 
-- **Status** — auto-derived by the reactor's poller from each captain's pane buffer (#43). Captains do not write status on every event.
+- **Status (auto)** — every reactor cycle (`cockpit reactor poll-status`) reads each captain's cmux pane, classifies the tail into `idle | busy | blocked | errored | offline`, and writes `{spokeVault}/status.md`. No agent action required. Manual `write-status.sh` writes are opt-in and may be clobbered on the next poll.
 - **Handoff files** — captain writes when in-flight work needs to survive into tomorrow; skipped on uneventful sessions.
 - **Daily logs** — captain writes when the day produced something worth a log; not on a schedule.
 - **Learnings** — recorded when a captain encounters a genuinely surprising or reusable pattern.
