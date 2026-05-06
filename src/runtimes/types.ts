@@ -17,9 +17,14 @@ export interface RuntimeSpawnOptions {
   pinToTop?: boolean;
 }
 
+// "tab" creates a new top-level surface (cmux: new-surface) inside the
+// workspace; the cardinal directions split the current surface into a pane
+// (cmux: new-pane). Both produce a PaneRef with a fresh surfaceId.
+export type PanePlacement = "tab" | "right" | "left" | "up" | "down";
+
 export interface RuntimePaneOptions {
   workspaceId: string;
-  direction: "right" | "left" | "up" | "down";
+  direction: PanePlacement;
   title?: string;
 }
 
