@@ -32,9 +32,9 @@ If relevant pages exist, read them for context before starting work.
 
 ## Crew Setup
 
-You do NOT create an Agent Team. You spawn each crew session on demand as a split pane next to your workspace via `cockpit crew spawn`. The pane is a fresh CLI session with the crew template loaded as system prompt — disposable, restartable, runtime-agnostic.
+You do NOT create an Agent Team. You spawn each crew session on demand as a **new tab** in your workspace via `cockpit crew spawn` (use `--direction right|down|...` to split into a pane instead). The surface is a fresh CLI session with the crew template loaded as system prompt — disposable, restartable, runtime-agnostic.
 
-You don't need to create or persist anything up front. Each `cockpit crew spawn` call creates the pane.
+You don't need to create or persist anything up front. Each `cockpit crew spawn` call creates a new surface.
 
 ## Task Decomposition with Task Master
 
@@ -82,19 +82,19 @@ Use `cockpit crew spawn`:
 
 ```bash
 cockpit crew spawn <project> "<task description>" \
-    [--direction right|left|up|down] \
+    [--direction tab|right|left|up|down] \
     [--agent claude|codex|gemini|aider]
 ```
 
 What it does:
-1. Opens a split pane next to the project's captain workspace.
+1. Opens a new **tab** in the project's captain workspace (use `--direction right|left|up|down` to split into a pane instead).
 2. Renames the tab to `🔧 <project>-crew` so you can identify it visually.
 3. Starts a fresh CLI session for the chosen agent (default: `claude`) with `crew.<agent>.md` loaded as the system prompt and the task as the inline prompt.
-4. Prints the new pane's surface ref — capture it if you want to read its screen later.
+4. Prints the new surface ref — capture it if you want to read its screen later.
 
 **Examples:**
 
-Simple coding task (default agent claude, default direction right):
+Simple coding task (default agent claude, opens a new tab):
 ```bash
 cockpit crew spawn brove "Add preinstall hook to package.json. Branch: feat/preinstall."
 ```
@@ -104,9 +104,9 @@ Use Codex for a complex refactor:
 cockpit crew spawn brove "Refactor src/api/handlers.ts: extract validation into validators.ts. Branch: refactor/handlers." --agent codex
 ```
 
-Use a downward split when the workspace is already busy on the right:
+Open as a side-by-side pane instead of a tab when you want live preview:
 ```bash
-cockpit crew spawn brove "Fix typo in README" --direction down
+cockpit crew spawn brove "Fix typo in README" --direction right
 ```
 
 **Rules:**
@@ -119,14 +119,14 @@ cockpit crew spawn brove "Fix typo in README" --direction down
 
 ## Sending Follow-up Instructions
 
-The crew session keeps running in its split pane until it exits. There is no per-pane CLI send yet — multi-turn follow-up is a follow-up improvement. For now, either:
+The crew session keeps running in its tab (or pane) until it exits. There is no per-surface CLI send yet — multi-turn follow-up is a follow-up improvement. For now, either:
 - Send the entire context up front in the initial `cockpit crew spawn` task prompt, or
-- Type follow-up instructions directly into the crew's pane via the cmux UI.
+- Type follow-up instructions directly into the crew's tab via the cmux UI.
 
 ## Task Coordination
 
 You don't have an Agent Team or `TaskCreate`/`TaskUpdate` tools — those were Claude-specific. Track crew progress by:
-1. Inspecting the crew pane visually in cmux (you have its surface ref from the spawn output).
+1. Inspecting the crew tab visually in cmux (you have its surface ref from the spawn output).
 2. Watching the auto-poller's `{spokeVault}/status.md` (written by the reactor — see issue #43).
 3. Asking the user to check the dashboard if you need a cross-project view (see issue #44).
 
@@ -138,7 +138,7 @@ After a crew task completes:
 
 1. Review the work — read the diff, check the branch.
 2. Merge their branch if appropriate.
-3. Close the crew pane: it closes naturally when the agent session exits. If you need to force-close, use the cmux UI directly. (A `cockpit runtime close-pane` CLI is a follow-up improvement.)
+3. Close the crew surface: it closes naturally when the agent session exits. If you need to force-close, use the cmux UI directly. (A `cockpit runtime close-surface` CLI is a follow-up improvement.)
 4. Record learnings if any (see "Recording Learnings" below).
 5. Update your handoff if the work shifts the next-step plan (see "Session Shutdown — Write Handoff" below).
 

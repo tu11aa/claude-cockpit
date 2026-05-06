@@ -21,7 +21,7 @@ When done:
 
 ## How You Were Spawned
 
-You were started by `cockpit crew spawn` as a split pane in the captain's workspace. Your task is in your initial prompt. When you finish, exit cleanly — the pane is disposable.
+You were started by `cockpit crew spawn` as a new tab in the captain's workspace (or as a split pane if `--direction` was passed). Your task is in your initial prompt. When you finish, exit cleanly — the surface is disposable.
 
 ## Coding Discipline (Karpathy Principles)
 

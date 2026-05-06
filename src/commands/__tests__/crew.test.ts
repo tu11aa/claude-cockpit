@@ -66,7 +66,7 @@ describe("cockpit crew spawn", () => {
     loadConfig.mockReset();
   });
 
-  it("opens a split pane in the captain workspace and sends the agent command", async () => {
+  it("opens a tab in the captain workspace and sends the agent command", async () => {
     loadConfig.mockReturnValue({
       commandName: "command",
       hubVault: "~/hub",
@@ -85,7 +85,7 @@ describe("cockpit crew spawn", () => {
     expect(status).toHaveBeenCalledWith("brove-captain");
     expect(newPane).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: "workspace:5",
-      direction: "right",
+      direction: "tab",
     }));
     expect(sendToPane).toHaveBeenCalledWith(
       { workspaceId: "workspace:5", surfaceId: "surface:9" },

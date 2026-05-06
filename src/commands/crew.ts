@@ -11,14 +11,14 @@ import {
   createAiderDriver,
   CapabilityRegistry,
 } from "../drivers/index.js";
-import type { PaneRef } from "../runtimes/types.js";
+import type { PaneRef, PanePlacement } from "../runtimes/types.js";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 
 export interface CrewSpawnInput {
   project: string;
   task: string;
-  direction?: "right" | "left" | "up" | "down";
+  direction?: PanePlacement;
   agent?: string;
 }
 
@@ -57,23 +57,23 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     promptFile,
   });
 
-  const direction = input.direction ?? "right";
+  const direction: PanePlacement = input.direction ?? "tab";
   const title = `🔧 ${input.project}-crew`;
   const pane = await runtime.newPane({ workspaceId: captain.id, direction, title });
   await runtime.sendToPane(pane, command);
   return pane;
 }
 
-export const crewCommand = new Command("crew").description("Spawn and manage crew sessions in split panes");
+export const crewCommand = new Command("crew").description("Spawn and manage crew sessions next to the project's captain");
 
 crewCommand
   .command("spawn")
-  .description("Spawn a crew session in a split pane next to the project's captain")
+  .description("Spawn a crew session as a tab in the project's captain workspace (use --direction to split into a pane instead)")
   .argument("<project>", "Project name (must be registered)")
   .argument("<task>", "Task prompt for the crew session")
-  .option("--direction <dir>", "Split direction (right|left|up|down)", "right")
+  .option("--direction <dir>", "Placement: tab (default) or split direction (right|left|up|down)", "tab")
   .option("--agent <name>", "Agent CLI to use (claude|codex|gemini|aider)", "claude")
-  .action(async (project: string, task: string, opts: { direction: "right" | "left" | "up" | "down"; agent: string }) => {
+  .action(async (project: string, task: string, opts: { direction: PanePlacement; agent: string }) => {
     try {
       const pane = await runCrewSpawn({ project, task, direction: opts.direction, agent: opts.agent });
       console.log(chalk.green(`✔ Crew spawned in ${pane.workspaceId} ${pane.surfaceId}`));

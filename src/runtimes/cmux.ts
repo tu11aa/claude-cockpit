@@ -94,10 +94,14 @@ export function createCmuxDriver(): RuntimeDriver {
 
     async newPane(opts: RuntimePaneOptions): Promise<PaneRef> {
       const titleArg = opts.title ? ` --title "${escape(opts.title)}"` : "";
-      const output = cmux(`new-pane --type terminal --direction ${opts.direction} --workspace "${opts.workspaceId}"`);
+      const cmd = opts.direction === "tab"
+        ? `new-surface --type terminal --workspace "${opts.workspaceId}"`
+        : `new-pane --type terminal --direction ${opts.direction} --workspace "${opts.workspaceId}"`;
+      const output = cmux(cmd);
       const surfaceId = output.match(/surface:\d+/)?.[0];
       if (!surfaceId) {
-        throw new Error(`cmux new-pane did not return a surface id: ${output}`);
+        const verb = opts.direction === "tab" ? "new-surface" : "new-pane";
+        throw new Error(`cmux ${verb} did not return a surface id: ${output}`);
       }
       if (opts.title) {
         try {

@@ -134,6 +134,35 @@ describe("cmux driver", () => {
     expect(calls.some((c) => c.includes("new-pane") && c.includes("--direction right") && c.includes("--workspace \"workspace:1\""))).toBe(true);
   });
 
+  it("newPane with direction=tab calls cmux new-surface instead of new-pane", async () => {
+    execMock.mockImplementation((cmd: string) => {
+      if (cmd.includes("new-surface")) return "OK surface:31 workspace:1";
+      return "";
+    });
+    const pane = await driver.newPane({ workspaceId: "workspace:1", direction: "tab" });
+    expect(pane).toEqual({ workspaceId: "workspace:1", surfaceId: "surface:31" });
+    const calls = execMock.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((c) => c.includes("new-surface") && c.includes("--workspace \"workspace:1\""))).toBe(true);
+    expect(calls.every((c) => !c.includes("new-pane"))).toBe(true);
+    expect(calls.every((c) => !c.includes("--direction"))).toBe(true);
+  });
+
+  it("newPane with direction=tab and title renames the new surface", async () => {
+    execMock.mockImplementation((cmd: string) => {
+      if (cmd.includes("new-surface")) return "OK surface:42 workspace:7";
+      return "";
+    });
+    await driver.newPane({ workspaceId: "workspace:7", direction: "tab", title: "🔧 brove-crew" });
+    const calls = execMock.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((c) => c.includes("rename-tab") && c.includes("--surface \"surface:42\"") && c.includes("\"🔧 brove-crew\""))).toBe(true);
+  });
+
+  it("newPane with direction=tab throws when output has no surface id", async () => {
+    execMock.mockReturnValue("garbage");
+    await expect(driver.newPane({ workspaceId: "workspace:1", direction: "tab" }))
+      .rejects.toThrow(/new-surface did not return a surface/);
+  });
+
   it("newPane with title also calls rename-tab on the new surface", async () => {
     execMock.mockImplementation((cmd: string) => {
       if (cmd.includes("new-pane")) return "OK surface:9 pane:3 workspace:2";
