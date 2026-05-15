@@ -13,6 +13,8 @@ import {
   CapabilityRegistry,
 } from "../drivers/index.js";
 import type { PaneRef, PanePlacement, RuntimeDriver } from "../runtimes/types.js";
+import { buildLaunchCommand } from "../lib/launch-command.js";
+import { crewStateDir } from "../lib/crew-sentinel.js";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 
@@ -158,7 +160,13 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
   const pane = await runtime.newPane({ workspaceId: captain.id, direction, title });
 
   // Step 1: launch the CLI in the new tab.
-  await runtime.sendToPane(pane, cliCommand);
+  const wiring = agent.crewSignal?.({
+    project: input.project,
+    crew: name,
+    stateDir: crewStateDir(),
+  });
+  const launchCommand = buildLaunchCommand(cliCommand, wiring);
+  await runtime.sendToPane(pane, launchCommand);
 
   // Step 2: for interactive sessions, wait for the CLI to boot, then send the
   // task as the first prompt. For non-interactive (legacy) the prompt is
