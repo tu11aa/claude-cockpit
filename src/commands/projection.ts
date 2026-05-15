@@ -122,7 +122,9 @@ async function runEmit(opts: Opts & { dryRun?: boolean }) {
         console.error(chalk.yellow(`⚠ unknown project: ${projectName}`));
         continue;
       }
-      const source = await readProjectLevelSource(workspace, proj.path);
+      const source = await readProjectLevelSource(
+        createObsidianDriver({ root: proj.path }),
+      );
       if (!source) {
         console.log(chalk.gray(`- ${projectName}: no AGENTS.md, skipping`));
         continue;
