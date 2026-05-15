@@ -112,6 +112,17 @@ When working on cockpit:
 
 Full direction statement: [`docs/specs/2026-04-24-multi-agent-direction.md`](docs/specs/2026-04-24-multi-agent-direction.md).
 
+### Crew completion signals (#64)
+
+Cockpit-spawned Claude crews report turn-done/blocked to the reactor via a
+plugin hook (`plugin/hooks/hooks.json` → `cockpit crew-signal`), which writes a
+sentinel under `~/.config/cockpit/state/<project>/<crew>.<state>.json`. The
+reactor (`runAutoStatus`) reads these every cycle, so completion is visible even
+if the crew never self-reports or the captain is idle/compacted. The hook is a
+strict no-op unless `COCKPIT_CREW` is set, so it never affects normal Claude
+sessions. Non-Claude detection adapters (Codex/Gemini/Aider) are tracked in #68;
+the sentinel + reactor layers are already agent-agnostic.
+
 ## Coding Discipline: Karpathy Principles
 
 Every coding task in this repo follows [`plugin/skills/karpathy-principles/SKILL.md`](plugin/skills/karpathy-principles/SKILL.md):
