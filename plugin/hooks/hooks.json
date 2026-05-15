@@ -1,0 +1,14 @@
+{
+  "description": "Cockpit crew-completion signals: report crew done/blocked to the reactor (#64). No-op unless COCKPIT_CREW is set, so normal Claude sessions are unaffected.",
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "cockpit crew-signal" }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "cockpit crew-signal" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "cockpit crew-signal" }] }
+    ]
+  }
+}
