@@ -78,8 +78,8 @@ describe("runAutoStatus", () => {
     });
 
     expect(results).toEqual([
-      { project: "brove",  state: "idle", vaultPath: "/tmp/spokes/brove/status.md" },
-      { project: "solder", state: "busy", vaultPath: "/tmp/spokes/solder/status.md" },
+      { project: "brove",  state: "idle", vaultPath: "/tmp/spokes/brove/status.md", crewSignals: [] },
+      { project: "solder", state: "busy", vaultPath: "/tmp/spokes/solder/status.md", crewSignals: [] },
     ]);
     expect(writes).toHaveLength(2);
   });
@@ -174,8 +174,8 @@ describe("runAutoStatus", () => {
     });
 
     expect(results).toEqual([
-      { project: "brove",  state: "offline", vaultPath: "/tmp/spokes/brove/status.md" },
-      { project: "solder", state: "idle",    vaultPath: "/tmp/spokes/solder/status.md" },
+      { project: "brove",  state: "offline", vaultPath: "/tmp/spokes/brove/status.md", crewSignals: [] },
+      { project: "solder", state: "idle",    vaultPath: "/tmp/spokes/solder/status.md", crewSignals: [] },
     ]);
   });
 
