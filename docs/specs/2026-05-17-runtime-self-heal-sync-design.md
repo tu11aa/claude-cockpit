@@ -48,89 +48,142 @@ Success criteria:
 
 ## Approach
 
-**Source-fingerprint self-heal** (chosen over version-stamp, which misses
-same-version changes, and over mtime-watermark, which is marginally less
-robust under clock skew / file restores).
+**Cacheless idempotent mirror.** Every `cockpit` invocation mirrors each
+managed target (copy-if-different + prune). No fingerprint, no state file.
+
+A fingerprint/state-file design was implemented and rejected during
+development: a source-only fingerprint cache **can lie** — if the runtime
+dest is incomplete or corrupted while source is unchanged, the cache
+reports "synced" and the dest is never reconciled. That reintroduces the
+silent-drift bug one level up. Observed in practice: a poisoned
+`.sync-state.json` left `templates/` with 2 of 7 files and blocked
+self-heal until the state file was manually deleted.
+
+The managed dirs are tiny (dozens of small files); mirroring every run is
+sub-10ms, needs no crypto, and **cannot be poisoned** because the dest is
+always reconciled to source.
 
 ## Components
 
-### 1. `mirrorDir(src, dest)` — mirroring sync helper
+### 1. `copyIfDifferent(src, dest)` — idempotent file copy
+
+- Copy `src` → `dest` only if `dest` is missing or its **bytes differ**
+  (content comparison, not size+mtime — a same-size edit is always
+  detected, and an unchanged file is never rewritten ⇒ no mtime churn).
+- Returns whether a copy happened (drives `chmod`).
+
+### 1b. `mirrorDir(src, dest)` — recursive mirror
 
 Replaces additive `copyDirRecursive` for managed dirs:
 
-- Recursively copy files that are new or changed (size or mtime differs).
+- Recursively `copyIfDifferent` every file.
 - **Prune:** delete dest entries (files and dirs) absent from src.
-- `init` is refactored to call `mirrorDir`, so `init` and auto-sync share
-  one code path (no behavioral divergence).
+- Used for `mode: "tree"` targets (currently `plugin`).
+
+### 1c. `mirrorFlat(src, dest, match, chmod?)` — filtered flat sync
+
+For `mode: "flat"` targets where the runtime dir is a flat set of files
+copied from a differently-named, possibly mixed source dir:
+
+- `copyIfDifferent` only top-level files whose name matches `match`.
+- **Prune:** remove `dest` files whose name is not in the matched set.
+- Apply `chmod` to freshly copied files when specified (scripts → `0o755`).
+
+### 1d. Managed-target descriptors
+
+The source→runtime mapping is **not** same-name full-tree (discovered
+during implementation from `init.ts`):
+
+```ts
+MANAGED_TARGETS = [
+  { name: "plugin",    srcRel: "plugin",       mode: "tree" },
+  { name: "scripts",   srcRel: "scripts",      mode: "flat",
+    match: /\.sh$/,                              chmod: 0o755 },
+  { name: "templates", srcRel: "orchestrator", mode: "flat",
+    match: /\.(claude\.md|generic\.md|CLAUDE\.md)$/ },
+]
+```
+
+`name` = runtime dir under `~/.config/cockpit/`. `srcRel` = source dir
+relative to package root. Note `templates` ← `orchestrator/`.
 
 ### 2. `ensureRuntimeSynced()` — self-heal gate
 
-Called once at CLI entry (`src/index.ts`) before command dispatch.
+Called once at CLI entry (`src/index.ts`) before command dispatch, and
+reused by `cockpit init` (one code path; no divergence).
 
-- Resolve source root via existing `findPackageRoot()`.
-- For each managed subtree (`plugin/`, `templates/`, `scripts/`):
-  compute a fingerprint = hash over sorted `(relpath, size, mtimeMs)`.
-- Read recorded fingerprints from `~/.config/cockpit/.sync-state.json`
-  (`{ plugin, templates, scripts }`).
-- For each subtree whose fingerprint differs (or is missing): run
-  `mirrorDir` for that subtree, then rewrite that entry in the state file.
-- On match: read + compare only, no writes, no output.
-- On any error (source missing, FS error): write a one-line warning to
-  stderr and continue — the command must still run.
+- Resolve source root via package root (the dir containing the installed
+  `package.json`).
+- For each `MANAGED_TARGETS` entry: if its source dir exists, run
+  `mirrorDir` (tree) or `mirrorFlat` (flat). Unconditional — idempotent
+  copy-if-different makes the no-change case cheap and silent.
+- No fingerprint, no state file, no skip logic — the dest is always
+  reconciled, so nothing can claim "synced" while it is not.
+- On any per-target error (source missing, FS error): write a one-line
+  warning to stderr and continue — the command must still run. Never
+  throws.
 
-### 3. State file — `~/.config/cockpit/.sync-state.json`
+### 3. No state file
 
-`{ "plugin": "<hash>", "templates": "<hash>", "scripts": "<hash>" }`.
-Created/updated by `ensureRuntimeSynced`. Absent/corrupt → treated as
-"all stale", triggering a full re-sync (self-correcting).
+Deliberately none. The earlier `.sync-state.json` cache was removed
+because it could report "synced" over an incomplete dest. Any leftover
+`.sync-state.json` from the old design is inert (never read or written)
+and safe to delete.
 
 ## Hard Boundary
 
-The sync touches **only** `plugin/`, `templates/`, `scripts/`. It must
-never write or prune `config.json`, `sessions.json`, `reactions.json`,
-`spokes/`, `reactor-events/`, or any other `~/.config/cockpit` entry.
-Pruning is scoped per managed subtree — never at the `~/.config/cockpit`
-root.
+The sync touches **only** the runtime dirs named in `MANAGED_TARGETS`
+(`plugin/`, `scripts/`, `templates/`). It must never write or prune
+`config.json`, `sessions.json`, `reactions.json`, `spokes/`,
+`reactor-events/`, or any other `~/.config/cockpit` entry. Pruning is
+scoped per managed target — never at the `~/.config/cockpit` root. The
+user's hub vault (scaffolded by `init`) is **not** a managed target and
+is never pruned.
 
 ## Data Flow
 
 ```
 cockpit <cmd>
   -> ensureRuntimeSynced()
-       -> for sub in [plugin, templates, scripts]:
-            fp = fingerprint(source/sub)
-            if fp != state[sub]:
-                 mirrorDir(source/sub, runtime/sub)   # copy + prune
-                 state[sub] = fp
-       -> persist .sync-state.json (only if changed)
+       -> for t in MANAGED_TARGETS:                 # plugin, scripts, templates
+            if exists(sourceRoot/t.srcRel):
+                 t.mode == "tree"  ? mirrorDir(srcDir, runtime/t.name)
+                 t.mode == "flat"  ? mirrorFlat(srcDir, runtime/t.name, t.match, t.chmod)
   -> dispatch command
 ```
 
 ## Error Handling
 
-- Source root unresolvable / managed dir missing in source → warn, skip
-  that subtree, continue command.
-- FS error during mirror → warn with the path, leave runtime as-is for
-  that subtree (last-known-good), continue command.
-- Corrupt `.sync-state.json` → treat as empty, full re-sync.
+- Managed source dir missing → skip that target, continue command.
+- FS error during mirror → warn with the target name, leave runtime as-is
+  for that target (last-known-good), continue command.
 - Never throw out of `ensureRuntimeSynced`; the CLI must remain usable.
 
 ## Testing
 
-`mirrorDir`:
+`mirrorDir` (tree targets):
 - copies a new file
-- overwrites a changed file (size and mtime cases)
+- overwrites a changed file
 - **prunes a file deleted from src**
 - **prunes a dir deleted from src**
-- leaves an unmanaged sibling in dest untouched
+- mirrors nested dirs including dotfiles (`.claude-plugin/`)
+- **idempotent** — an unchanged file is not rewritten (no mtime churn)
+
+`mirrorFlat` (flat filtered targets):
+- copies only files matching `match`, ignores non-matching
+- **prunes a dest file no longer in the matched set**
+- applies `chmod` to copied files when specified
+- **idempotent** — an unchanged matched file is not rewritten
 
 `ensureRuntimeSynced`:
-- no-op when fingerprints match (no FS writes, no output)
-- syncs only the changed subtree on partial mismatch
+- syncs all managed targets (filtering + chmod per descriptor)
+- idempotent: unchanged source ⇒ no runtime files rewritten
+- **self-heals an incomplete dest even when source is unchanged**
+  (the core property — proves no cache can lie)
+- writes no `.sync-state.json`
 - never touches user-state files (`config.json` etc.) even when present
   in the runtime dir
-- missing source dir → warns, command proceeds
-- corrupt/absent state file → full re-sync, then steady state
+- missing source dir → command proceeds (no throw)
 
 ## Out of Scope (YAGNI)
 
