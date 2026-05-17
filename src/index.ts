@@ -4,6 +4,8 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { ensureRuntimeSynced } from "./lib/runtime-sync.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { initCommand } from "./commands/init.js";
 import { projectsCommand } from "./commands/projects.js";
@@ -25,6 +27,14 @@ import { projectionCommand } from "./commands/projection.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8"));
+
+// Self-heal the runtime copy of source-managed dirs before any command runs,
+// so source changes (skills, role templates, scripts) can never silently
+// drift from ~/.config/cockpit. Never throws.
+ensureRuntimeSynced({
+  sourceRoot: join(__dirname, ".."),
+  runtimeRoot: join(homedir(), ".config", "cockpit"),
+});
 
 const program = new Command();
 
