@@ -1,9 +1,12 @@
 // src/control/cockpitd.ts
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { spawn as realSpawn } from "node:child_process";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { createStore } from "./store.js";
 import { createDaemon } from "./daemon.js";
 import { startServer } from "./protocol.js";
+import { runHeadless } from "./headless-launcher.js";
 import type { TaskRecord } from "./types.js";
 
 export interface CockpitdOpts {
@@ -11,6 +14,7 @@ export interface CockpitdOpts {
   sockPath?: string;
   sweepMs?: number; // 0 disables the interval (tests)
   isPidAlive?: (pid: number) => boolean; // injectable for the headless reconcile path (tests)
+  spawn?: typeof realSpawn;
 }
 
 export function defaultIsPidAlive(pid: number): boolean {
@@ -23,7 +27,25 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   const sockPath = opts.sockPath ?? join(homedir(), ".config", "cockpit", "cockpit.sock");
   const store = createStore(stateRoot);
   const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
-  const d = createDaemon({ store, now: () => Date.now(), isPidAlive });
+  const spawn = opts.spawn ?? realSpawn;
+  const writeResult = (id: string, payload: string) => {
+    const p = join(stateRoot, "_results", `${id}.txt`);
+    mkdirSync(join(stateRoot, "_results"), { recursive: true });
+    writeFileSync(p, payload);
+    return p;
+  };
+  const ingest = (project: string) => (e: import("./types.js").ControlEvent) =>
+    void d.handle({ kind: "event", project, event: e });
+
+  const d = createDaemon({
+    store, now: () => Date.now(), isPidAlive,
+    launchHeadless: async (rec) => {
+      await runHeadless({
+        provider: rec.provider, task: rec.task, id: rec.id, sessionId: rec.sessionId,
+        spawn, emit: ingest(rec.project), writeResult,
+      });
+    },
+  });
 
   d.reconcile(); // crash recovery on boot
 
