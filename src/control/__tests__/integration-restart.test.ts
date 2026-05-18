@@ -59,6 +59,8 @@ describe("integration: headless dead-pid conservative crash recovery", () => {
       expect(st.state).toBe("failed");
       expect(st.state).not.toBe("done");
       expect(st.state).not.toBe("working");
+      // Proves it failed via reconcile's conservative path, not some other failure.
+      expect(st.error).toMatch(/orphan|daemon restart/i);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -85,6 +87,8 @@ describe("integration: headless dead-pid conservative crash recovery", () => {
 
       // Live child survives a daemon bounce: must remain working.
       expect(st.state).toBe("working");
+      // Reconcile correctly SKIPPED the record rather than transitioning it.
+      expect(st.lastEvent).not.toBe("reconcile");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
