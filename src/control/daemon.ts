@@ -8,6 +8,8 @@ export interface DaemonDeps {
   now: () => number;
   /** Injected in Task 14; resumes a blocked session. Optional until then. */
   deliverReply?: (rec: TaskRecord, message: string) => Promise<void>;
+  /** Defaults to a real process.kill(pid,0) check at the call site (Task 17). */
+  isPidAlive?: (pid: number) => boolean;
 }
 
 type Req =
@@ -43,6 +45,21 @@ export function createDaemon(deps: DaemonDeps) {
           const next = reduce(r, { type: "task.started", id: r.id }, now());
           store.put(next);
           return next;
+        }
+      }
+    },
+    reconcile(): void {
+      const alive = deps.isPidAlive ?? (() => true);
+      for (const r of store.listAll()) {
+        if (r.state !== "working" && r.state !== "submitted") continue;
+        if (r.mode === "headless") {
+          if (r.pid != null && alive(r.pid)) continue; // still running, keep watching
+          store.put({
+            ...r, state: "failed", lastEvent: "reconcile",
+            error: "orphaned by daemon restart; exit unobserved (conservative fail)",
+          });
+        } else {
+          store.put({ ...r, state: "stalled", lastEvent: "reconcile" });
         }
       }
     },

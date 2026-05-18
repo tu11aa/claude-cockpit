@@ -45,4 +45,29 @@ describe("daemon handler", () => {
       d.handle({ kind: "reply", project: "p", id: "t1", message: "x" }),
     ).rejects.toThrow(/not blocked/i);
   });
+
+  it("reconcile: working headless task with dead pid → failed", async () => {
+    const store = createStore(dir);
+    store.put({ ...rec("h1"), state: "working", mode: "headless", pid: 999999 });
+    const d = createDaemon({ store, now: () => 5000, isPidAlive: () => false });
+    d.reconcile();
+    expect(store.get("p", "h1")?.state).toBe("failed");
+    expect(store.get("p", "h1")?.error).toMatch(/orphan|daemon restart/i);
+  });
+
+  it("reconcile: working interactive task → stalled (hook source gone)", async () => {
+    const store = createStore(dir);
+    store.put({ ...rec("i1"), state: "working", mode: "interactive" });
+    const d = createDaemon({ store, now: () => 5000, isPidAlive: () => false });
+    d.reconcile();
+    expect(store.get("p", "i1")?.state).toBe("stalled");
+  });
+
+  it("reconcile: working headless task with live pid → stays working", async () => {
+    const store = createStore(dir);
+    store.put({ ...rec("h2"), state: "working", mode: "headless", pid: 4242 });
+    const d = createDaemon({ store, now: () => 5000, isPidAlive: () => true });
+    d.reconcile();
+    expect(store.get("p", "h2")?.state).toBe("working");
+  });
 });
