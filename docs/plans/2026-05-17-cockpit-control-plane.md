@@ -410,7 +410,7 @@ git commit -m "feat(control): atomic per-task JSON state store"
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `src/control/__tests__/store.test.ts` (add `writeFileSync` to the `node:fs` import):
+Add to `src/control/__tests__/store.test.ts` (add `writeFileSync` and `mkdirSync` to the `node:fs` import):
 
 ```typescript
   it("a corrupt task file does not break listing of sibling tasks", () => {
@@ -425,6 +425,7 @@ Add to `src/control/__tests__/store.test.ts` (add `writeFileSync` to the `node:f
 
   it("quarantine() renames a corrupt file out of the way", () => {
     const s = createStore(dir);
+    mkdirSync(join(dir, "proj"), { recursive: true });
     writeFileSync(join(dir, "proj", "bad.json"), "{not json");
     s.quarantine("proj", "bad");
     expect(s.get("proj", "bad")).toBeUndefined();

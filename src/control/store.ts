@@ -10,6 +10,7 @@ export interface Store {
   get(project: string, id: string): TaskRecord | undefined;
   list(project: string): TaskRecord[];
   listAll(): TaskRecord[];
+  quarantine(project: string, id: string): void;
 }
 
 export function createStore(root: string): Store {
@@ -49,6 +50,10 @@ export function createStore(root: string): Store {
       return readdirSync(root)
         .filter((p) => existsSync(projDir(p)))
         .flatMap((p) => this.list(p));
+    },
+    quarantine(project, id) {
+      const f = taskFile(project, id);
+      if (existsSync(f)) renameSync(f, `${f}.corrupt.${Date.now()}`);
     },
   };
 }
