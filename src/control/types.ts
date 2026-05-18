@@ -38,6 +38,7 @@ export type ControlEvent =
   | { type: "task.done"; id: string; resultRef: string; parseWarning?: boolean }
   | { type: "task.failed"; id: string; error: string; exitCode?: number };
 
+// 'stalled' is intentionally excluded — recoverable by the watchdog.
 export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([
   "done",
   "failed",

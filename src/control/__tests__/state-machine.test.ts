@@ -35,10 +35,23 @@ describe("state-machine reduce", () => {
     expect(next.exitCode).toBe(1);
   });
 
+  it("submitted + task.blocked → blocked", () => {
+    const next = reduce(rec(), { type: "task.blocked", id: "t1", reason: "need input", question: "which path?" }, 3500);
+    expect(next.state).toBe("blocked");
+    expect(next.question).toBe("which path?");
+  });
+
   it("blocked + task.progress does NOT auto-unblock (explicit reply required)", () => {
     const next = reduce(rec({ state: "blocked", question: "q?" }), { type: "task.progress", id: "t1" }, 4000);
     expect(next.state).toBe("blocked");
     expect(next.lastHeartbeat).toBe(4000); // liveness still updates
+    expect(next.lastEvent).toBe("task.progress"); // lastEvent stays consistent
+  });
+
+  it("stalled + task.done → done", () => {
+    const next = reduce(rec({ state: "stalled" }), { type: "task.done", id: "t1", resultRef: "/r" }, 4500);
+    expect(next.state).toBe("done");
+    expect(next.resultRef).toBe("/r");
   });
 
   it("blocked + task.started (resume after reply) → working, clears question", () => {
