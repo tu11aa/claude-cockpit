@@ -30,7 +30,10 @@ export function createDaemon(deps: DaemonDeps) {
         case "dispatch": {
           store.put(req.record);
           if (req.record.mode === "headless" && deps.launchHeadless) {
-            void deps.launchHeadless(req.record);
+            deps.launchHeadless(req.record).catch((e: unknown) => {
+              const error = e instanceof Error ? e.message : String(e);
+              store.put({ ...req.record, state: "failed", lastEvent: "launch-error", error });
+            });
           }
           return req.record;
         }

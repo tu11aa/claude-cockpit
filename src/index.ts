@@ -62,4 +62,7 @@ program.addCommand(trackerCommand);
 program.addCommand(notifyCommand);
 program.addCommand(projectionCommand);
 
-program.parse();
+program.parseAsync().catch((e) => {
+  process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`);
+  process.exit(1);
+});

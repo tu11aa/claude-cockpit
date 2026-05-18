@@ -125,4 +125,21 @@ describe("daemon handler", () => {
       lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
     expect(launched).toEqual([]);
   });
+
+  it("dispatch headless: launchHeadless rejection drives task failed, daemon does not throw", async () => {
+    const store = createStore(dir);
+    const d = createDaemon({
+      store, now: () => 1, isPidAlive: () => true,
+      launchHeadless: async () => { throw new Error("no adapter for gemini"); },
+    });
+    const r: any = await d.handle({ kind: "dispatch", record: {
+      id: "g9", project: "p", provider: "gemini", mode: "headless",
+      state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
+    expect(r.state).toBe("submitted"); // dispatch returns immediately
+    await new Promise((res) => setTimeout(res, 10)); // let the rejection settle
+    const after = store.get("p", "g9");
+    expect(after?.state).toBe("failed");
+    expect(after?.error).toBe("no adapter for gemini");
+  });
 });

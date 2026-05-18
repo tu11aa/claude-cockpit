@@ -32,8 +32,18 @@ async function call(req: unknown): Promise<unknown> {
     return await sendRequest(SOCK, req);
   } catch {
     ensureDaemon(process.execPath, join(homedir(), ".config", "cockpit", "dist", "control", "cockpitd.js"));
-    // one retry after kickstart; if still down, fail loud (no scrape fallback)
-    return sendRequest(SOCK, req);
+    // kickstart→socket is racy; bounded backoff. If all attempts fail,
+    // throw the last error (fail loud, no scrape fallback).
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i++) {
+      try {
+        return await sendRequest(SOCK, req);
+      } catch (e) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    throw lastErr;
   }
 }
 
@@ -42,7 +52,7 @@ export const crewControlCommand = new Command("crew")
 
 crewControlCommand
   .command("dispatch <project> <task>")
-  .requiredOption("--provider <p>", "claude|opencode|codex|gemini")
+  .requiredOption("--provider <p>", "claude|opencode|codex (gemini: experimental, headless not supported)")
   .option("--mode <m>", "headless|interactive", "interactive")
   .action(async (project: string, task: string, opts: { provider: Provider; mode: Mode }) => {
     const req = buildDispatchRequest({ project, task, provider: opts.provider, mode: opts.mode });
@@ -64,16 +74,20 @@ crewControlCommand
     process.stdout.write(JSON.stringify(r) + "\n");
   });
 
+// TODO(downstream interactive-wiring spec): deliverReply is not yet wired in
+// cockpitd, so this transitions task state but never reaches the agent. Deferred.
 crewControlCommand
   .command("reply <project> <id> <message>")
   .action(async (project: string, id: string, message: string) => {
+    process.stderr.write("reply delivery is not yet wired (deferred); state transitioned only\n");
     const r = await call({ kind: "reply", project, id, message });
     process.stdout.write(JSON.stringify(r) + "\n");
   });
 
+// TODO(downstream interactive-wiring spec): not yet functional — no-op stub.
 crewControlCommand
-  .command("_hook <event>")
-  .description("internal: invoked by injected agent hooks")
+  .command("_hook <event>", { hidden: true })
+  .description("internal: invoked by injected agent hooks (deferred — not yet functional)")
   .action(async (event: string) => {
     // hook payload arrives on stdin (Claude hook JSON); minimal: emit progress.
     process.stdout.write(`hook:${event}\n`);

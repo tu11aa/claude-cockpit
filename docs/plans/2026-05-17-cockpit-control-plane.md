@@ -2218,7 +2218,13 @@ Add the case in `handle` (before `default`/end of switch):
         case "dispatch": {
           store.put(req.record);
           if (req.record.mode === "headless" && deps.launchHeadless) {
-            void deps.launchHeadless(req.record);
+            // A missing adapter (e.g. gemini) makes launchHeadless reject;
+            // never let that become an unhandled rejection that kills the
+            // daemon — drive the task to `failed` instead.
+            deps.launchHeadless(req.record).catch((e: unknown) => {
+              const error = e instanceof Error ? e.message : String(e);
+              store.put({ ...req.record, state: "failed", lastEvent: "launch-error", error });
+            });
           }
           return req.record;
         }
@@ -2306,9 +2312,10 @@ Replace the `createDaemon` construction with a launch-wired daemon:
 
 ```typescript
   const spawn = opts.spawn ?? realSpawn;
+  const resultsDir = join(stateRoot, "_results");
+  mkdirSync(resultsDir, { recursive: true }); // created once at init, not per write
   const writeResult = (id: string, payload: string) => {
-    const p = join(stateRoot, "_results", `${id}.txt`);
-    mkdirSync(join(stateRoot, "_results"), { recursive: true });
+    const p = join(resultsDir, `${id}.txt`);
     writeFileSync(p, payload);
     return p;
   };
@@ -2346,6 +2353,29 @@ import { crewControlCommand } from "./commands/crew-control.js";
 ```
 
 and change `program.addCommand(crewCommand);` to `program.addCommand(crewControlCommand);`.
+
+Also replace `program.parse();` with a clean fail-loud handler so async
+action errors print one line to stderr instead of a raw unhandled rejection:
+
+```typescript
+program.parseAsync().catch((e) => {
+  process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`);
+  process.exit(1);
+});
+```
+
+**Code-review reconciliation (applied post-Phase-10):**
+
+- `crew-control.ts` `call()`: after `ensureDaemon`, the single retry is a
+  bounded backoff — up to 3 `sendRequest` attempts ~200ms apart; if all fail,
+  throw the last error (still fail-loud, now clean via the `parseAsync().catch`).
+- `crew-control.ts` `--provider` help: `claude|opencode|codex (gemini: experimental, headless not supported)`
+  (`gemini` stays in the `Provider` type — experimental per spec).
+- `crew-control.ts` deferred surfaces made loud, not silent: `_hook` is a
+  commander `{ hidden: true }` no-op stub with a `TODO(downstream
+  interactive-wiring spec)` comment; `reply` prints
+  `reply delivery is not yet wired (deferred); state transitioned only` to
+  stderr (no `deliverReply` is wired in cockpitd yet).
 
 - [ ] **Step 6: Build + full suite + commit**
 

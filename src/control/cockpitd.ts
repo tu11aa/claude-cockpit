@@ -28,9 +28,10 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   const store = createStore(stateRoot);
   const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
   const spawn = opts.spawn ?? realSpawn;
+  const resultsDir = join(stateRoot, "_results");
+  mkdirSync(resultsDir, { recursive: true });
   const writeResult = (id: string, payload: string) => {
-    const p = join(stateRoot, "_results", `${id}.txt`);
-    mkdirSync(join(stateRoot, "_results"), { recursive: true });
+    const p = join(resultsDir, `${id}.txt`);
     writeFileSync(p, payload);
     return p;
   };
