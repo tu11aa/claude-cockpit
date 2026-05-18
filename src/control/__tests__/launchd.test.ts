@@ -11,4 +11,15 @@ describe("launchd plist", () => {
     expect(xml).toContain("<key>RunAtLoad</key>");
     expect(xml).toContain("/opt/cockpit/dist/control/cockpitd.js");
   });
+
+  it("XML-escapes interpolated values so a special-char home dir stays well-formed", () => {
+    const xml = renderPlist("/Users/O&M/bin/node", "/x/<y>/cockpitd.js");
+    expect(xml).toContain("/Users/O&amp;M/bin/node");
+    expect(xml).toContain("/x/&lt;y&gt;/cockpitd.js");
+    // No raw &/< from interpolation should survive inside <string> values.
+    expect(xml).not.toContain("/Users/O&M/bin/node");
+    expect(xml).not.toContain("/x/<y>/cockpitd.js");
+    // The only `&` occurrences are well-formed entities.
+    expect(xml.replace(/&(amp|lt|gt|quot);/g, "")).not.toContain("&");
+  });
 });

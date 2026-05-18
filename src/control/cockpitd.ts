@@ -10,13 +10,19 @@ export interface CockpitdOpts {
   stateRoot?: string;
   sockPath?: string;
   sweepMs?: number; // 0 disables the interval (tests)
+  isPidAlive?: (pid: number) => boolean; // injectable for the headless reconcile path (tests)
+}
+
+export function defaultIsPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (e: any) { return e?.code === "EPERM"; } // EPERM = alive but not ours; ESRCH = dead
 }
 
 export function startCockpitd(opts: CockpitdOpts = {}) {
   const stateRoot = opts.stateRoot ?? join(homedir(), ".config", "cockpit", "state");
   const sockPath = opts.sockPath ?? join(homedir(), ".config", "cockpit", "cockpit.sock");
   const store = createStore(stateRoot);
-  const isPidAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
   const d = createDaemon({ store, now: () => Date.now(), isPidAlive });
 
   d.reconcile(); // crash recovery on boot

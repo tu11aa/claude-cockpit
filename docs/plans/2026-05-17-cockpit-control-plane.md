@@ -1780,6 +1780,17 @@ describe("launchd plist", () => {
     expect(xml).toContain("<key>RunAtLoad</key>");
     expect(xml).toContain("/opt/cockpit/dist/control/cockpitd.js");
   });
+
+  it("XML-escapes interpolated values so a special-char home dir stays well-formed", () => {
+    const xml = renderPlist("/Users/O&M/bin/node", "/x/<y>/cockpitd.js");
+    expect(xml).toContain("/Users/O&amp;M/bin/node");
+    expect(xml).toContain("/x/&lt;y&gt;/cockpitd.js");
+    // No raw &/< from interpolation should survive inside <string> values.
+    expect(xml).not.toContain("/Users/O&M/bin/node");
+    expect(xml).not.toContain("/x/<y>/cockpitd.js");
+    // The only `&` occurrences are well-formed entities.
+    expect(xml.replace(/&(amp|lt|gt|quot);/g, "")).not.toContain("&");
+  });
 });
 ```
 
@@ -1803,18 +1814,23 @@ export function plistPath(): string {
   return join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 }
 
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export function renderPlist(nodeBin: string, daemonEntry: string): string {
+  const logPath = join(homedir(), ".config", "cockpit", "cockpitd.log");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
-  <array><string>${nodeBin}</string><string>${daemonEntry}</string></array>
+  <array><string>${xmlEscape(nodeBin)}</string><string>${xmlEscape(daemonEntry)}</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>${join(homedir(), ".config", "cockpit", "cockpitd.log")}</string>
-  <key>StandardOutPath</key><string>${join(homedir(), ".config", "cockpit", "cockpitd.log")}</string>
+  <key>StandardErrorPath</key><string>${xmlEscape(logPath)}</string>
+  <key>StandardOutPath</key><string>${xmlEscape(logPath)}</string>
 </dict>
 </plist>
 `;
@@ -1830,7 +1846,10 @@ export function ensureDaemon(nodeBin: string, daemonEntry: string): void {
     try { execFileSync("launchctl", ["bootstrap", `gui/${uid}`, p], { stdio: "ignore" }); }
     catch { /* already bootstrapped */ }
     execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/${LABEL}`], { stdio: "ignore" });
-  } catch { /* daemon ensure is best-effort; CLI fails loud on socket miss */ }
+  } catch (e) {
+    // daemon ensure is best-effort (still don't throw); CLI fails loud on socket miss
+    process.stderr.write(`[cockpit] warn: ensureDaemon failed (${e instanceof Error ? e.message : e})\n`);
+  }
 }
 ```
 
@@ -1860,8 +1879,17 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startCockpitd } from "../cockpitd.js";
+import { startCockpitd, defaultIsPidAlive } from "../cockpitd.js";
 import { sendRequest } from "../protocol.js";
+
+describe("defaultIsPidAlive", () => {
+  it("treats the current process as alive", () => {
+    expect(defaultIsPidAlive(process.pid)).toBe(true);
+  });
+  it("treats an almost-certainly-free pid as dead (ESRCH path)", () => {
+    expect(defaultIsPidAlive(2147483646)).toBe(false);
+  });
+});
 
 describe("cockpitd smoke", () => {
   let stop: (() => void) | undefined;
@@ -1879,6 +1907,38 @@ describe("cockpitd smoke", () => {
       lastEvent: "", heartbeatBudgetMs: 1000 } });
     const r: any = await sendRequest(sock, { kind: "event", project: "p", event: { type: "task.started", id: "t1" } });
     expect(r.state).toBe("working");
+  });
+
+  it("honors an injected isPidAlive on boot reconcile (dead pid → failed)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "cp-cd-"));
+    const sock = join(dir, "c.sock");
+    const stateRoot = join(dir, "state");
+    const working = {
+      id: "h1", project: "p", provider: "claude", mode: "headless",
+      state: "working", task: "x", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "", heartbeatBudgetMs: 1000, pid: 4242,
+    };
+
+    // Seed a working headless task via a first daemon instance, then stop it.
+    const seeder = startCockpitd({ stateRoot, sockPath: sock, sweepMs: 0 });
+    await sendRequest(sock, { kind: "seed", record: working });
+    seeder.stop();
+
+    // Restart with injected dead-pid checker: boot reconcile must fail it.
+    const dead = startCockpitd({ stateRoot, sockPath: sock, sweepMs: 0, isPidAlive: () => false });
+    stop = dead.stop;
+    const failed: any = await sendRequest(sock, { kind: "status", project: "p", id: "h1" });
+    expect(failed.state).toBe("failed");
+    dead.stop();
+
+    // Restart with alive checker on a fresh seed: boot reconcile must keep it working.
+    const seeder2 = startCockpitd({ stateRoot, sockPath: sock, sweepMs: 0 });
+    await sendRequest(sock, { kind: "seed", record: working });
+    seeder2.stop();
+    const aliveD = startCockpitd({ stateRoot, sockPath: sock, sweepMs: 0, isPidAlive: () => true });
+    stop = aliveD.stop;
+    const stillWorking: any = await sendRequest(sock, { kind: "status", project: "p", id: "h1" });
+    expect(stillWorking.state).toBe("working");
   });
 });
 ```
@@ -1903,13 +1963,19 @@ export interface CockpitdOpts {
   stateRoot?: string;
   sockPath?: string;
   sweepMs?: number; // 0 disables the interval (tests)
+  isPidAlive?: (pid: number) => boolean; // injectable for the headless reconcile path (tests)
+}
+
+export function defaultIsPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (e: any) { return e?.code === "EPERM"; } // EPERM = alive but not ours; ESRCH = dead
 }
 
 export function startCockpitd(opts: CockpitdOpts = {}) {
   const stateRoot = opts.stateRoot ?? join(homedir(), ".config", "cockpit", "state");
   const sockPath = opts.sockPath ?? join(homedir(), ".config", "cockpit", "cockpit.sock");
   const store = createStore(stateRoot);
-  const isPidAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
   const d = createDaemon({ store, now: () => Date.now(), isPidAlive });
 
   d.reconcile(); // crash recovery on boot

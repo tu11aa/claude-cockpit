@@ -10,18 +10,23 @@ export function plistPath(): string {
   return join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 }
 
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export function renderPlist(nodeBin: string, daemonEntry: string): string {
+  const logPath = join(homedir(), ".config", "cockpit", "cockpitd.log");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
-  <array><string>${nodeBin}</string><string>${daemonEntry}</string></array>
+  <array><string>${xmlEscape(nodeBin)}</string><string>${xmlEscape(daemonEntry)}</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>${join(homedir(), ".config", "cockpit", "cockpitd.log")}</string>
-  <key>StandardOutPath</key><string>${join(homedir(), ".config", "cockpit", "cockpitd.log")}</string>
+  <key>StandardErrorPath</key><string>${xmlEscape(logPath)}</string>
+  <key>StandardOutPath</key><string>${xmlEscape(logPath)}</string>
 </dict>
 </plist>
 `;
@@ -37,5 +42,8 @@ export function ensureDaemon(nodeBin: string, daemonEntry: string): void {
     try { execFileSync("launchctl", ["bootstrap", `gui/${uid}`, p], { stdio: "ignore" }); }
     catch { /* already bootstrapped */ }
     execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/${LABEL}`], { stdio: "ignore" });
-  } catch { /* daemon ensure is best-effort; CLI fails loud on socket miss */ }
+  } catch (e) {
+    // daemon ensure is best-effort (still don't throw); CLI fails loud on socket miss
+    process.stderr.write(`[cockpit] warn: ensureDaemon failed (${e instanceof Error ? e.message : e})\n`);
+  }
 }
