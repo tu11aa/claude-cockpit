@@ -43,7 +43,7 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
     launchHeadless: async (rec) => {
       await runHeadless({
         provider: rec.provider, task: rec.task, id: rec.id, sessionId: rec.sessionId,
-        spawn, emit: ingest(rec.project), writeResult,
+        cwd: rec.cwd, spawn, emit: ingest(rec.project), writeResult,
       });
     },
   });

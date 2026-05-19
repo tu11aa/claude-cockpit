@@ -15,7 +15,12 @@ export const codexHeadless: HeadlessAdapter = {
     //    flag. Resume is unused in foundational scope (multi-turn/reply
     //    deferred) — kept best-effort; flag order is verify-on-implement when
     //    the interactive-wiring spec lands.
-    const opts = ["--json", "--skip-git-repo-check"];
+    // --sandbox workspace-write: codex exec defaults to a READ-ONLY sandbox,
+    // so a crew could analyze/spec but never edit code (real prod finding:
+    // codex bailed "workspace is mounted read-only"). workspace-write lets it
+    // edit within its cwd (set by the launcher per-task) — NOT full-disk
+    // (danger-full-access) which would be reckless for an autonomous agent.
+    const opts = ["--json", "--skip-git-repo-check", "--sandbox", "workspace-write"];
     if (sessionId) return ["codex", "exec", "resume", sessionId, ...opts, task];
     return ["codex", "exec", ...opts, task];
   },

@@ -18,6 +18,7 @@ export interface TaskRecord {
   state: TaskState;
   task: string;            // the dispatched instruction
   sessionId?: string;      // provider session id for resume (blocked→reply)
+  cwd?: string;            // working dir for the spawned headless child (project/worktree); unset → daemon cwd
   pid?: number;            // headless child pid (daemon-owned)
   question?: string;       // populated when state === "blocked"
   error?: string;          // populated when state === "failed"

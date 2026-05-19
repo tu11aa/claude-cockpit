@@ -1338,7 +1338,18 @@ export const codexHeadless: HeadlessAdapter = {
     // prod use): --skip-git-repo-check is REQUIRED (daemon cwd under launchd
     // is not a git repo → codex aborts otherwise); resume is a SUBCOMMAND,
     // there is no `--session` flag.
-    const opts = ["--json", "--skip-git-repo-check"];
+    // ENHANCED (post-PR-#85, "enable codex to do real work"): codex exec
+    // defaults to a READ-ONLY sandbox → a crew could spec but never edit code
+    // (real prod: codex bailed "workspace is mounted read-only"). Added
+    // `--sandbox workspace-write` (NOT danger-full-access). This pairs with a
+    // new per-task working dir spanning several files (a single coherent
+    // feature; reconciliation note here covers all): TaskRecord gains
+    // `cwd?: string` (types.ts); `cockpit crew dispatch` gains `--cwd <dir>`
+    // (crew-control.ts buildDispatchRequest); RunHeadlessOpts gains `cwd?`
+    // and runHeadless passes `{ cwd }` to spawn (headless-launcher.ts) —
+    // headless previously inherited the daemon's launchd `/` cwd, wrong for
+    // every provider; cockpitd launchHeadless passes `rec.cwd`.
+    const opts = ["--json", "--skip-git-repo-check", "--sandbox", "workspace-write"];
     if (sessionId) return ["codex", "exec", "resume", sessionId, ...opts, task];
     return ["codex", "exec", ...opts, task];
   },

@@ -10,14 +10,14 @@ import type { Mode, Provider, TaskRecord } from "../control/types.js";
 const SOCK = join(homedir(), ".config", "cockpit", "cockpit.sock");
 
 export function buildDispatchRequest(o: {
-  project: string; provider: Provider; mode: Mode; task: string; budgetMs?: number;
+  project: string; provider: Provider; mode: Mode; task: string; budgetMs?: number; cwd?: string;
 }): { kind: "dispatch"; record: TaskRecord } {
   const now = Date.now();
   return {
     kind: "dispatch",
     record: {
       id: randomUUID(), project: o.project, provider: o.provider, mode: o.mode,
-      state: "submitted", task: o.task, createdAt: now, lastHeartbeat: now,
+      state: "submitted", task: o.task, cwd: o.cwd, createdAt: now, lastHeartbeat: now,
       lastEvent: "dispatch", heartbeatBudgetMs: o.budgetMs ?? 300000,
     },
   };
@@ -62,8 +62,9 @@ export function addControlPlaneCrewCommands(crew: Command): void {
     .description("Dispatch a crew task via the control-plane daemon")
     .requiredOption("--provider <p>", "claude|opencode|codex (gemini: experimental, headless not supported)")
     .option("--mode <m>", "headless|interactive", "interactive")
-    .action(async (project: string, task: string, opts: { provider: Provider; mode: Mode }) => {
-      const req = buildDispatchRequest({ project, task, provider: opts.provider, mode: opts.mode });
+    .option("--cwd <dir>", "working dir for the crew (project/worktree); required for codex to edit code")
+    .action(async (project: string, task: string, opts: { provider: Provider; mode: Mode; cwd?: string }) => {
+      const req = buildDispatchRequest({ project, task, provider: opts.provider, mode: opts.mode, cwd: opts.cwd });
       const r = await call(req);
       process.stdout.write(JSON.stringify(r) + "\n");
     });

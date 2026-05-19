@@ -33,6 +33,33 @@ describe("runHeadless", () => {
     expect(done).toMatchObject({ resultRef: "/tmp/result/t1.txt" });
   });
 
+  it("spawns the child in opts.cwd (so codex/claude work in the project, not /)", async () => {
+    const child = fakeChild();
+    const spawn = vi.fn(() => child);
+    const p = runHeadless({
+      provider: "codex", task: "x", id: "t9", cwd: "/work/proj",
+      spawn: spawn as any, emit: () => {},
+    });
+    child.emit("close", 0);
+    await p;
+    expect(spawn).toHaveBeenCalledWith(
+      "codex", expect.any(Array),
+      expect.objectContaining({ cwd: "/work/proj" }),
+    );
+  });
+
+  it("cwd unset → spawn cwd is undefined (inherit, back-compat)", async () => {
+    const child = fakeChild();
+    const spawn = vi.fn(() => child);
+    const p = runHeadless({
+      provider: "claude", task: "x", id: "t10",
+      spawn: spawn as any, emit: () => {},
+    });
+    child.emit("close", 0);
+    await p;
+    expect((spawn.mock.calls[0] as unknown[])[2]).toMatchObject({ cwd: undefined });
+  });
+
   it("emits task.failed on non-zero exit", async () => {
     const child = fakeChild();
     const events: any[] = [];

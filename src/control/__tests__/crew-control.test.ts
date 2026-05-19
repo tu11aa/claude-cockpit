@@ -15,6 +15,16 @@ describe("crew-control request builders", () => {
     expect(r.record.id.length).toBeGreaterThan(0);
   });
 
+  it("carries cwd onto the record when provided (codex needs it to edit code)", () => {
+    const r = buildDispatchRequest({ project: "p", provider: "codex", mode: "headless", task: "t", cwd: "/work/wt" });
+    expect(r.record.cwd).toBe("/work/wt");
+  });
+
+  it("cwd is omitted when not provided (inherit daemon cwd)", () => {
+    const r = buildDispatchRequest({ project: "p", provider: "codex", mode: "headless", task: "t" });
+    expect(r.record.cwd).toBeUndefined();
+  });
+
   it("status request targets a task id", () => {
     expect(buildStatusRequest("p", "t9")).toEqual({ kind: "status", project: "p", id: "t9" });
   });

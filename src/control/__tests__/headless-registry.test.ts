@@ -19,6 +19,9 @@ describe("headless registry", () => {
     expect(argv[argv.length - 1]).toBe("do x");
     // no bogus `--session` flag (resume is a subcommand in real codex CLI).
     expect(argv).not.toContain("--session");
+    // codex exec defaults to a READ-ONLY sandbox → must request workspace-write
+    // or a crew can analyze/spec but never edit code (real prod finding).
+    expect(argv.join(" ")).toContain("--sandbox workspace-write");
   });
 
   it("codex buildCommand with sessionId uses the `resume` subcommand, not --session", () => {
