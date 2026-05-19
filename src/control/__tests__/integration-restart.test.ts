@@ -16,11 +16,15 @@ describe("integration: daemon restart mid-task (success criterion)", () => {
     const stateRoot = join(dir, "state");
 
     let h = startCockpitd({ stateRoot, sockPath: sock, sweepMs: 0 });
-    await sendRequest(sock, { kind: "dispatch", record: {
+    // Construct the precondition (a WORKING interactive task) via `seed`, not
+    // `dispatch`: red-team #4 fix makes interactive dispatch fail-loud until
+    // the deferred interactive launcher exists. The success criterion under
+    // test is reconcile behavior (working interactive → stalled across a
+    // restart, never fabricated `done`), which is unchanged and still proven.
+    await sendRequest(sock, { kind: "seed", record: {
       id: "t1", project: "p", provider: "claude", mode: "interactive",
-      state: "submitted", task: "x", createdAt: 1, lastHeartbeat: 1,
-      lastEvent: "dispatch", heartbeatBudgetMs: 999999 } });
-    await sendRequest(sock, { kind: "event", project: "p", event: { type: "task.started", id: "t1" } });
+      state: "working", task: "x", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "task.started", heartbeatBudgetMs: 999999 } });
 
     // crash the daemon mid-task
     h.stop();

@@ -113,17 +113,37 @@ describe("daemon handler", () => {
     expect(launched).toEqual(["h9"]);
   });
 
-  it("dispatch interactive does NOT auto-launch headless", async () => {
+  // Red-team #4 (High): interactive dispatch with no interactive launcher must
+  // FAIL LOUD, never silently sit in `submitted` forever.
+  it("dispatch interactive (no launcher) → failed loud, never headless", async () => {
     const store = createStore(dir);
     const launched: string[] = [];
     const d = createDaemon({
       store, now: () => 1, launchHeadless: async (r) => { launched.push(r.id); },
     });
-    await d.handle({ kind: "dispatch", record: {
+    const r: any = await d.handle({ kind: "dispatch", record: {
       id: "i9", project: "p", provider: "claude", mode: "interactive",
       state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
       lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
-    expect(launched).toEqual([]);
+    expect(launched).toEqual([]);                 // headless launcher untouched
+    expect(r.state).toBe("failed");               // loud, not black-hole
+    expect(r.lastEvent).toBe("no-launcher");
+    expect(r.error).toMatch(/interactive mode is not yet implemented/i);
+    expect(store.get("p", "i9")?.state).toBe("failed"); // persisted
+  });
+
+  it("dispatch interactive uses launchInteractive when wired (forward hook)", async () => {
+    const store = createStore(dir);
+    const launched: string[] = [];
+    const d = createDaemon({
+      store, now: () => 1, launchInteractive: async (r) => { launched.push(r.id); },
+    });
+    const r: any = await d.handle({ kind: "dispatch", record: {
+      id: "i10", project: "p", provider: "claude", mode: "interactive",
+      state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
+    expect(launched).toEqual(["i10"]);
+    expect(r.state).toBe("submitted"); // launcher owns the lifecycle, not failed
   });
 
   it("dispatch headless: launchHeadless rejection drives task failed, daemon does not throw", async () => {

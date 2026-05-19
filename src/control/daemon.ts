@@ -13,6 +13,12 @@ export interface DaemonDeps {
   isPidAlive?: (pid: number) => boolean;
   /** Wired in cockpitd to runHeadless; absent in pure unit tests. */
   launchHeadless?: (rec: TaskRecord) => Promise<void>;
+  /**
+   * Forward hook for the deferred interactive-wiring spec. While absent,
+   * interactive dispatch fails LOUD (red-team #4) instead of silently
+   * black-holing in `submitted` forever.
+   */
+  launchInteractive?: (rec: TaskRecord) => Promise<void>;
 }
 
 type Req =
@@ -34,8 +40,29 @@ export function createDaemon(deps: DaemonDeps) {
               const error = e instanceof Error ? e.message : String(e);
               store.put({ ...req.record, state: "failed", lastEvent: "launch-error", error });
             });
+            return req.record;
           }
-          return req.record;
+          if (req.record.mode === "interactive" && deps.launchInteractive) {
+            deps.launchInteractive(req.record).catch((e: unknown) => {
+              const error = e instanceof Error ? e.message : String(e);
+              store.put({ ...req.record, state: "failed", lastEvent: "launch-error", error });
+            });
+            return req.record;
+          }
+          // No launcher for this mode → fail LOUD, never silently park in
+          // `submitted` (red-team #4). Interactive launcher is the deferred
+          // interactive-wiring spec; until then, say so explicitly.
+          const failed: TaskRecord = {
+            ...req.record,
+            state: "failed",
+            lastEvent: "no-launcher",
+            error:
+              req.record.mode === "interactive"
+                ? "interactive mode is not yet implemented (deferred interactive-wiring spec); use --mode headless"
+                : `no launcher available for mode '${req.record.mode}'`,
+          };
+          store.put(failed);
+          return failed;
         }
         case "event": {
           const cur = store.get(req.project, req.event.id);
