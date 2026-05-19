@@ -6,12 +6,14 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { ensureRuntimeSynced } from "./lib/runtime-sync.js";
+import { ensureDaemon } from "./control/launchd.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { initCommand } from "./commands/init.js";
 import { projectsCommand } from "./commands/projects.js";
 import { statusCommand } from "./commands/status.js";
 import { commandCommand } from "./commands/command.js";
 import { crewCommand } from "./commands/crew.js";
+import { addControlPlaneCrewCommands } from "./commands/crew-control.js";
 import { dashboardCommand } from "./commands/dashboard.js";
 import { launchCommand } from "./commands/launch.js";
 import { shutdownCommand } from "./commands/shutdown.js";
@@ -36,6 +38,12 @@ ensureRuntimeSynced({
   runtimeRoot: join(homedir(), ".config", "cockpit"),
 });
 
+// Self-heal the control-plane daemon the same way we self-heal the runtime:
+// best-effort, never throws; the CLI fails loud later if the socket is unreachable.
+// ensureDaemon resolves its own entrypoint (see launchd.daemonEntryPath) — no
+// path is passed here so no call site can get it wrong.
+ensureDaemon();
+
 const program = new Command();
 
 program
@@ -47,6 +55,10 @@ program.addCommand(doctorCommand);
 program.addCommand(initCommand);
 program.addCommand(projectsCommand);
 program.addCommand(statusCommand);
+// Legacy crew verbs (spawn/send/read/close/list) stay intact for live captains;
+// control-plane verbs (dispatch/status/tasks/reply) are attached onto the same
+// `cockpit crew` command so PR #85 doesn't break the captain-ops playbook.
+addControlPlaneCrewCommands(crewCommand);
 program.addCommand(crewCommand);
 program.addCommand(commandCommand);
 program.addCommand(dashboardCommand);
@@ -62,4 +74,7 @@ program.addCommand(trackerCommand);
 program.addCommand(notifyCommand);
 program.addCommand(projectionCommand);
 
-program.parse();
+program.parseAsync().catch((e) => {
+  process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`);
+  process.exit(1);
+});
