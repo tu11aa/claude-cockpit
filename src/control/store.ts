@@ -3,7 +3,7 @@ import {
   mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, existsSync,
   statSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { TaskRecord } from "./types.js";
 
 export interface Store {
@@ -14,9 +14,40 @@ export interface Store {
   quarantine(project: string, id: string): void;
 }
 
+/**
+ * SECURITY (red-team #1, Critical): `project`/`id` arrive unsanitized from the
+ * socket (dispatch + seed) and a crafted value (`..`, `/`, absolute, NUL) would
+ * let a confused-deputy read/write arbitrary files as the user. A `project`/`id`
+ * must be a single safe path segment — no separators, traversal, NUL, or dot
+ * dirs. Enforced at the one chokepoint every fs op funnels through.
+ */
+function safeSegment(kind: "project" | "id", s: unknown): string {
+  if (typeof s !== "string" || s.length === 0) {
+    throw new Error(`invalid ${kind}: must be a non-empty string`);
+  }
+  if (s.includes("\0")) throw new Error(`invalid ${kind}: NUL byte not allowed`);
+  if (s === "." || s === ".." || /[/\\]/.test(s)) {
+    throw new Error(`invalid ${kind}: '${s}' — path separators/traversal not allowed`);
+  }
+  return s;
+}
+
 export function createStore(root: string): Store {
-  const projDir = (p: string) => join(root, p);
-  const taskFile = (p: string, id: string) => join(projDir(p), `${id}.json`);
+  const rootResolved = resolve(root);
+
+  // Defense in depth: even after segment validation, never let a resolved
+  // path escape the state root.
+  const assertUnderRoot = (target: string): string => {
+    const r = resolve(target);
+    if (r !== rootResolved && !r.startsWith(rootResolved + sep)) {
+      throw new Error(`path escapes state root: ${target}`);
+    }
+    return target;
+  };
+
+  const projDir = (p: string) => assertUnderRoot(join(root, safeSegment("project", p)));
+  const taskFile = (p: string, id: string) =>
+    assertUnderRoot(join(projDir(p), `${safeSegment("id", id)}.json`));
 
   return {
     put(rec) {
@@ -49,7 +80,7 @@ export function createStore(root: string): Store {
     listAll() {
       if (!existsSync(root)) return [];
       return readdirSync(root)
-        .filter((p) => { try { return statSync(projDir(p)).isDirectory(); } catch { return false; } })
+        .filter((p) => { try { return statSync(join(root, p)).isDirectory(); } catch { return false; } })
         .flatMap((p) => this.list(p));
     },
     quarantine(project, id) {
