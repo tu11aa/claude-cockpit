@@ -17,6 +17,19 @@ describe("launchd plist", () => {
     expect(xml).toMatch(/<key>ThrottleInterval<\/key><integer>\d+<\/integer>/);
   });
 
+  it("bakes PATH into EnvironmentVariables so launchd headless spawn resolves (red-team #3)", () => {
+    const p = "/Users/me/.nvm/versions/node/v24/bin:/Applications/cmux.app/Contents/Resources/bin:/usr/bin";
+    const xml = renderPlist("/usr/local/bin/node", "/opt/cockpit/dist/control/cockpitd.js", p);
+    expect(xml).toContain("<key>EnvironmentVariables</key>");
+    expect(xml).toContain(`<key>PATH</key><string>${p}</string>`);
+  });
+
+  it("XML-escapes a PATH containing special chars", () => {
+    const xml = renderPlist("/n", "/d/cockpitd.js", "/a&b:/c<d>");
+    expect(xml).toContain("<string>/a&amp;b:/c&lt;d&gt;</string>");
+    expect(xml).not.toContain("/a&b:/c<d>");
+  });
+
   it("XML-escapes interpolated values so a special-char home dir stays well-formed", () => {
     const xml = renderPlist("/Users/O&M/bin/node", "/x/<y>/cockpitd.js");
     expect(xml).toContain("/Users/O&amp;M/bin/node");

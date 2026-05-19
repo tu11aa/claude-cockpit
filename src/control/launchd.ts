@@ -26,7 +26,14 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function renderPlist(nodeBin: string, daemonEntry: string): string {
+/**
+ * Red-team #3 (High): launchd starts the daemon with a minimal PATH that does
+ * NOT include where `claude`/`codex`/`opencode` live (nvm/cmux dirs), so every
+ * headless `spawn` failed `ENOENT` in the real deployment (shell tests + fake
+ * spawn hid it). We bake the installing process's PATH into the plist so the
+ * daemon and its spawned crew children resolve the provider binaries.
+ */
+export function renderPlist(nodeBin: string, daemonEntry: string, pathEnv = ""): string {
   const logPath = join(homedir(), ".config", "cockpit", "cockpitd.log");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -35,6 +42,8 @@ export function renderPlist(nodeBin: string, daemonEntry: string): string {
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array><string>${xmlEscape(nodeBin)}</string><string>${xmlEscape(daemonEntry)}</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>${xmlEscape(pathEnv)}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
@@ -54,7 +63,7 @@ export function ensureDaemon(nodeBin: string = process.execPath): void {
   try {
     const p = plistPath();
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, renderPlist(nodeBin, daemonEntryPath()));
+    writeFileSync(p, renderPlist(nodeBin, daemonEntryPath(), process.env.PATH ?? ""));
     const uid = process.getuid?.() ?? 0;
     try { execFileSync("launchctl", ["bootstrap", `gui/${uid}`, p], { stdio: "ignore" }); }
     catch { /* already bootstrapped */ }
