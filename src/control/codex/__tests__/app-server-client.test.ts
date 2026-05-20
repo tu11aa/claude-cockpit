@@ -232,3 +232,29 @@ describe("AppServerClient server-request round-trip", () => {
     expect(JSON.parse(lastLine)).toEqual({ jsonrpc: "2.0", id: 42, result: { answer: "yes" } });
   });
 });
+
+describe("AppServerClient lifecycle cleanup", () => {
+  it("on child exit, pending _sendRequest promises reject with 'closed'", async () => {
+    const proc = fakeChild();
+    const c = new AppServerClient({ spawn: () => proc });
+    c.start();
+    (c as any)._handshakeDone = true;
+    const p = (c as any)._sendRequest("foo/bar", {});
+    proc.emit("exit", 0, null);
+    await expect(p).rejects.toThrow(/closed/);
+  });
+  it("on child exit, an in-flight sendTurn promise rejects with 'closed'", async () => {
+    const proc = fakeChild();
+    const c = new AppServerClient({ spawn: () => proc });
+    c.start();
+    (c as any)._handshakeDone = true;
+    const p = c.sendTurn("T1", "hi");
+    // Mirror back the ack so we're past the await; now we're waiting on the notification
+    const req = JSON.parse((proc.stdin as any)._written.trim().split("\n").pop()!);
+    proc.stdout.emit("data", JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { turnId: "TURN-X" } }) + "\n");
+    // Yield so the await completes and the notification listener is attached
+    await new Promise((res) => setImmediate(res));
+    proc.emit("exit", 0, null);
+    await expect(p).rejects.toThrow(/closed/);
+  });
+});

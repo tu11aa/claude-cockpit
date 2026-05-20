@@ -40,7 +40,10 @@ export class AppServerClient extends EventEmitter {
     this.proc = sp();
     this.proc.stdout.on("data", (d: Buffer | string) => this._onStdout(d.toString()));
     this.proc.stderr.on("data", (d: Buffer | string) => this.emit("stderr", d.toString()));
-    this.proc.on("exit", (code, signal) => this.emit("closed", { code, signal }));
+    this.proc.on("exit", (code, signal) => {
+      this._onClosed();
+      this.emit("closed", { code, signal });
+    });
     this.proc.on("error", (e) => this.emit("error", e));
   }
 
@@ -87,8 +90,13 @@ export class AppServerClient extends EventEmitter {
         if (n.method === "turn/completed") { cleanup(); resolve(ack); }
         if (n.method === "turn/failed") { cleanup(); reject(new Error(n.params?.error ?? "turn failed")); }
       };
-      const cleanup = () => this.off("notification", onNote);
+      const onClientClosed = () => { cleanup(); reject(new Error("AppServerClient: client closed before turn completed")); };
+      const cleanup = () => {
+        this.off("notification", onNote);
+        this.off("_clientClosed", onClientClosed);
+      };
       this.on("notification", onNote);
+      this.once("_clientClosed", onClientClosed);
     });
   }
 
@@ -112,6 +120,15 @@ export class AppServerClient extends EventEmitter {
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   protected _handshakeDone = false;
+
+  private _onClosed(): void {
+    // Mass-reject pending RPC promises so callers don't hang on child death.
+    const closedErr = new Error("AppServerClient: child closed before response");
+    for (const slot of this.pending.values()) slot.reject(closedErr);
+    this.pending.clear();
+    // Tell any waiters listening for child-close (sendTurn) to bail.
+    this.emit("_clientClosed");
+  }
 
   protected _sendRequest(method: string, params?: unknown): Promise<unknown> {
     if (!this._handshakeDone && method !== "initialize") {
