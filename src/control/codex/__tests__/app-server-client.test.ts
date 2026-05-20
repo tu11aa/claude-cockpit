@@ -53,3 +53,31 @@ describe("AppServerClient lifecycle", () => {
     // exit emitted synchronously by fake; emitter's 'closed' fires
   });
 });
+
+describe("AppServerClient.sendRequest (correlation by id)", () => {
+  it("resolves with result when the response arrives", async () => {
+    const proc = fakeChild();
+    const c = new AppServerClient({ spawn: () => proc });
+    c.start();
+    // Bypass handshake gate for this unit-level test:
+    (c as any)._handshakeDone = true;
+    const p = (c as any)._sendRequest("foo/bar", { x: 1 });
+    // Read the written line, mirror back a response
+    const written = (proc.stdin as any)._written as string;
+    const req = JSON.parse(written.trim());
+    expect(req.method).toBe("foo/bar");
+    expect(req.params).toEqual({ x: 1 });
+    proc.stdout.emit("data", JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { ok: true } }) + "\n");
+    await expect(p).resolves.toEqual({ ok: true });
+  });
+  it("rejects with error when an error response arrives", async () => {
+    const proc = fakeChild();
+    const c = new AppServerClient({ spawn: () => proc });
+    c.start();
+    (c as any)._handshakeDone = true;
+    const p = (c as any)._sendRequest("foo/bar", {});
+    const req = JSON.parse((proc.stdin as any)._written.trim());
+    proc.stdout.emit("data", JSON.stringify({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: "boom" } }) + "\n");
+    await expect(p).rejects.toThrow(/boom/);
+  });
+});

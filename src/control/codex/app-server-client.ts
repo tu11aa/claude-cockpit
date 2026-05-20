@@ -48,12 +48,41 @@ export class AppServerClient extends EventEmitter {
     if (this.proc) this.proc.kill();
   }
 
+  private nextId = 1;
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  protected _handshakeDone = false;
+
+  protected _sendRequest(method: string, params?: unknown): Promise<unknown> {
+    if (!this._handshakeDone && method !== "initialize") {
+      throw new Error(`AppServerClient: cannot call '${method}' before handshake (spec §3.2)`);
+    }
+    if (!this.proc) throw new Error("AppServerClient not started");
+    const id = this.nextId++;
+    const env = { jsonrpc: "2.0", id, method, params: params ?? {} };
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.proc!.stdin.write(JSON.stringify(env) + "\n");
+    });
+  }
+
+  private _dispatchResponse(msg: any): boolean {
+    if (typeof msg?.id !== "number") return false;
+    const slot = this.pending.get(msg.id);
+    if (!slot) return false;
+    this.pending.delete(msg.id);
+    if (msg.error) slot.reject(new Error(`${msg.error.message ?? "rpc-error"} (code ${msg.error.code})`));
+    else slot.resolve(msg.result);
+    return true;
+  }
+
   private _onStdout(s: string): void {
     for (const msg of _parseChunk(this.acc, s)) this._dispatch(msg);
   }
 
-  // Filled in Task 1.4+.
-  private _dispatch(_msg: unknown): void { /* noop until pending-map lands */ }
+  private _dispatch(msg: unknown): void {
+    if (this._dispatchResponse(msg)) return;
+    // Notifications (id-less) handled in Task 1.5.
+  }
 }
 
 function defaultSpawn(): Child {
