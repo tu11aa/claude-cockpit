@@ -104,6 +104,11 @@ export class AppServerClient extends EventEmitter {
     return this._sendRequest("thread/inject_items", { threadId, items });
   }
 
+  respondToServerRequest(id: number, result: unknown): void {
+    if (!this.proc) throw new Error("AppServerClient not started");
+    this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+  }
+
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   protected _handshakeDone = false;
@@ -137,11 +142,14 @@ export class AppServerClient extends EventEmitter {
 
   private _dispatch(msg: unknown): void {
     if (this._dispatchResponse(msg)) return;
-    if (typeof (msg as any)?.method === "string" && (msg as any).id === undefined) {
-      this.emit("notification", { method: (msg as any).method, params: (msg as any).params });
+    const m = msg as any;
+    if (typeof m?.method === "string" && typeof m?.id === "number") {
+      this.emit("serverRequest", { id: m.id, method: m.method, params: m.params });
       return;
     }
-    // Server requests (have method AND id) handled in Task 1.10.
+    if (typeof m?.method === "string" && m?.id === undefined) {
+      this.emit("notification", { method: m.method, params: m.params });
+    }
   }
 }
 

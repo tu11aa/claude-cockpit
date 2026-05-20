@@ -215,3 +215,20 @@ describe("AppServerClient steer/interrupt/inject", () => {
     await p;
   });
 });
+
+describe("AppServerClient server-request round-trip", () => {
+  it("emits 'serverRequest' for messages with method AND id; responds via respondToServerRequest", async () => {
+    const proc = fakeChild(); const c = new AppServerClient({ spawn: () => proc });
+    c.start(); (c as any)._handshakeDone = true;
+    const got: any[] = [];
+    c.on("serverRequest", (r) => got.push(r));
+    // Server initiates a tool-input request
+    proc.stdout.emit("data",
+      JSON.stringify({ jsonrpc: "2.0", id: 42, method: "tool/request-user-input", params: { question: "ok?" } }) + "\n");
+    expect(got).toEqual([{ id: 42, method: "tool/request-user-input", params: { question: "ok?" } }]);
+    // Application answers
+    c.respondToServerRequest(42, { answer: "yes" });
+    const lastLine = (proc.stdin as any)._written.trim().split("\n").pop()!;
+    expect(JSON.parse(lastLine)).toEqual({ jsonrpc: "2.0", id: 42, result: { answer: "yes" } });
+  });
+});
