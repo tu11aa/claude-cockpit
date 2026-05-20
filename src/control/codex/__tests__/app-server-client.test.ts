@@ -94,3 +94,27 @@ describe("AppServerClient notifications", () => {
     expect(got).toEqual([{ method: "agentMessageDelta", params: { text: "hi" } }]);
   });
 });
+
+describe("AppServerClient handshake", () => {
+  it("refuses any method call before handshake", async () => {
+    const proc = fakeChild();
+    const c = new AppServerClient({ spawn: () => proc });
+    c.start();
+    expect(() => (c as any)._sendRequest("turn/start", {})).toThrow(/before handshake/);
+  });
+  it("initialize sends a request, awaits response, then sends 'initialized' notification", async () => {
+    const proc = fakeChild();
+    const c = new AppServerClient({ spawn: () => proc, clientInfo: { name: "cockpit", version: "test" } });
+    c.start();
+    const p = c.initialize();
+    const first = JSON.parse((proc.stdin as any)._written.trim().split("\n")[0]);
+    expect(first.method).toBe("initialize");
+    expect(first.params.clientInfo).toEqual({ name: "cockpit", version: "test" });
+    proc.stdout.emit("data", JSON.stringify({ jsonrpc: "2.0", id: first.id, result: { capabilities: {} } }) + "\n");
+    await p;
+    const lines = (proc.stdin as any)._written.trim().split("\n");
+    const last = JSON.parse(lines[lines.length - 1]);
+    expect(last.method).toBe("initialized");
+    expect(last.id).toBeUndefined();
+  });
+});
