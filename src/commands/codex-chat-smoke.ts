@@ -25,6 +25,9 @@ export const codexChatSmokeCommand = new Command("codex-chat-smoke")
         cwd: resolve(opts.cwd),
         model: opts.model,
         sandbox: "workspace-write",
+        // With --approval, force untrusted policy so codex requests approval
+        // for any tool/shell invocation — proves the round-trip.
+        ...(opts.approval ? { approvalPolicy: "untrusted" } : {}),
       });
       await c.sendTurn(threadId, "Reply with exactly: PING-OK");
       await assertSawText(transcript, "PING-OK");
