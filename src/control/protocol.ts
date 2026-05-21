@@ -93,3 +93,38 @@ export function sendRequest(sockPath: string, msg: unknown, timeoutMs = 5000): P
     });
   });
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Streaming-subscribe frames for `cockpit crew chat / attach` (spec §4.5).
+// Additive; existing request/response verbs untouched. Cooperates with #87.
+
+export type AttachFrame =
+  | { type: "delta"; taskId: string; text: string }
+  | { type: "turn-started"; taskId: string }
+  | { type: "turn-completed"; taskId: string }
+  | { type: "input-requested"; taskId: string; requestId: number; question: string }
+  | { type: "approval-requested"; taskId: string; requestId: number; question: string; kind: string }
+  | { type: "gate-promoted"; taskId: string; gateId: string }
+  | { type: "reattached"; taskId: string }
+  | { type: "closed"; taskId: string; reason: string }
+  | { type: "_keepalive" };
+
+export type AttachInbound =
+  | { op: "attach"; taskId: string }
+  | { op: "say"; taskId: string; text: string }
+  | { op: "steer"; taskId: string; text: string }
+  | { op: "interrupt"; taskId: string }
+  | { op: "answer"; taskId: string; requestId: number; payload: unknown };
+
+export function encodeFrame(f: AttachFrame): string {
+  return JSON.stringify(f) + "\n";
+}
+
+export function decodeFrames(wire: string): AttachFrame[] {
+  const out: AttachFrame[] = [];
+  for (const line of wire.split("\n")) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line) as AttachFrame); } catch { /* skip malformed */ }
+  }
+  return out;
+}
