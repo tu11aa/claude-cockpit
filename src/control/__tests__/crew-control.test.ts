@@ -1,6 +1,6 @@
 // src/control/__tests__/crew-control.test.ts
 import { describe, it, expect, vi } from "vitest";
-import { buildDispatchRequest, buildStatusRequest } from "../../commands/crew-control.js";
+import { buildDispatchRequest, buildStatusRequest, buildGateResolveRequest } from "../../commands/crew-control.js";
 
 describe("crew-control request builders", () => {
   it("dispatch request carries project/provider/mode/task and a generated id", () => {
@@ -40,5 +40,12 @@ describe("crew-control request builders", () => {
   it("approvalPolicy is omitted when not provided (default auto-approve)", () => {
     const r = buildDispatchRequest({ project: "p", provider: "codex", mode: "interactive", task: "t" });
     expect(r.record.approvalPolicy).toBeUndefined();
+  });
+
+  it("gate-resolve payload derives decision='approve' from message so codex receives a valid approval (matches crew-attach renderer)", () => {
+    const r = buildGateResolveRequest({ project: "p", gateId: "g1", message: "approve" });
+    expect(r.kind).toBe("gate-resolve");
+    expect(r.gateId).toBe("g1");
+    expect(r.payload).toEqual({ text: "approve", decision: "approve" });
   });
 });

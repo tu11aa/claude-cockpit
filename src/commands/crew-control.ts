@@ -33,6 +33,18 @@ export function buildStatusRequest(project: string, id: string) {
   return { kind: "status" as const, project, id };
 }
 
+export function buildGateResolveRequest(o: { project: string; gateId: string; message: string }) {
+  const lower = o.message.toLowerCase().trim();
+  const decision = lower.startsWith("approve") ? "approve" : lower.startsWith("deny") ? "deny" : undefined;
+  return {
+    kind: "gate-resolve" as const,
+    project: o.project,
+    gateId: o.gateId,
+    resolvedBy: "captain",
+    payload: { text: o.message, ...(decision ? { decision } : {}) },
+  };
+}
+
 export async function cockpitdCall(req: unknown): Promise<unknown> {
   try {
     return await sendRequest(SOCK, req);
@@ -100,13 +112,7 @@ export function addControlPlaneCrewCommands(crew: Command): void {
     .option("--gate <gateId>", "resolve a pending gate by id (codex interactive, spec §4.9)")
     .action(async (project: string, id: string, message: string, opts: { gate?: string }) => {
       if (opts.gate) {
-        const r = await cockpitdCall({
-          kind: "gate-resolve",
-          project,
-          gateId: opts.gate,
-          resolvedBy: "captain",
-          payload: { text: message },
-        });
+        const r = await cockpitdCall(buildGateResolveRequest({ project, gateId: opts.gate, message }));
         process.stdout.write(JSON.stringify(r) + "\n");
         return;
       }
