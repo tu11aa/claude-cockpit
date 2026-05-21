@@ -8,7 +8,30 @@ export type TaskState =
   | "blocked"
   | "done"
   | "failed"
-  | "stalled";
+  | "stalled"
+  | "awaiting-input";
+
+export interface DispatchAttempt {
+  attemptId: string;
+  startedAt: number;
+  pid?: number;
+  resumeRef?: string;       // opaque, hashed-treated, NEVER parsed (orca #1148)
+  lastHeartbeatAt: number;
+  error?: string;
+  exitCode?: number;
+  circuitBroken?: boolean;
+}
+
+export interface Gate {
+  gateId: string;
+  taskId: string;
+  kind: "input" | "approval";
+  question: string;
+  state: "pending" | "resolved" | "timeout";
+  createdAt: number;
+  resolvedBy?: string;
+  resolution?: unknown;
+}
 
 export interface TaskRecord {
   id: string;
@@ -29,6 +52,14 @@ export interface TaskRecord {
   lastHeartbeat: number;   // epoch ms
   lastEvent: string;       // last event type applied
   heartbeatBudgetMs: number; // per-task stall threshold
+  /** Append-only dispatch attempt history. Current attempt = at(-1). */
+  attempts: DispatchAttempt[];
+  /** Interactive-codex HITL slice (spec §4.9). */
+  gates?: Gate[];
+  /** Codex AskForApproval policy forwarded to startThread (interactive only).
+   *  When set to "untrusted", codex requests approval for tool/shell calls,
+   *  exercising the gate-promotion flow end-to-end. */
+  approvalPolicy?: string;
 }
 
 export type ControlEvent =
@@ -37,7 +68,14 @@ export type ControlEvent =
   | { type: "heartbeat"; id: string }
   | { type: "task.blocked"; id: string; reason: string; question: string }
   | { type: "task.done"; id: string; resultRef: string; parseWarning?: boolean }
-  | { type: "task.failed"; id: string; error: string; exitCode?: number };
+  | { type: "task.failed"; id: string; error: string; exitCode?: number }
+  | { type: "task.session"; id: string; resumeRef: string }
+  | { type: "task.turn.started"; id: string; turnId: string }
+  | { type: "task.turn.completed"; id: string; turnId: string }
+  | { type: "task.delta"; id: string; turnId: string; chunk: string }
+  | { type: "task.input.requested"; id: string; requestId: number; question: string }
+  | { type: "task.approval.requested"; id: string; requestId: number; question: string; kind: string }
+  | { type: "task.reattached"; id: string };
 
 // 'stalled' is intentionally excluded — recoverable by the watchdog.
 export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([

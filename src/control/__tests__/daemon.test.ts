@@ -1,5 +1,5 @@
 // src/control/__tests__/daemon.test.ts
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ function rec(id: string, overrides: Partial<TaskRecord> = {}): TaskRecord {
     id, project: "p", provider: "claude", mode: "interactive",
     state: "submitted", task: "t", createdAt: 1, lastHeartbeat: 1,
     lastEvent: "", heartbeatBudgetMs: 1000,
+    attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }],
     ...overrides,
   };
 }
@@ -107,7 +108,8 @@ describe("daemon handler", () => {
     const r: any = await d.handle({ kind: "dispatch", record: {
       id: "h9", project: "p", provider: "claude", mode: "headless",
       state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
-      lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
+      lastEvent: "dispatch", heartbeatBudgetMs: 1000,
+      attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }] } });
     expect(r.state).toBe("submitted");
     expect(store.get("p", "h9")).toBeTruthy();
     expect(launched).toEqual(["h9"]);
@@ -124,7 +126,8 @@ describe("daemon handler", () => {
     const r: any = await d.handle({ kind: "dispatch", record: {
       id: "i9", project: "p", provider: "claude", mode: "interactive",
       state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
-      lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
+      lastEvent: "dispatch", heartbeatBudgetMs: 1000,
+      attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }] } });
     expect(launched).toEqual([]);                 // headless launcher untouched
     expect(r.state).toBe("failed");               // loud, not black-hole
     expect(r.lastEvent).toBe("no-launcher");
@@ -141,7 +144,8 @@ describe("daemon handler", () => {
     const r: any = await d.handle({ kind: "dispatch", record: {
       id: "i10", project: "p", provider: "claude", mode: "interactive",
       state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
-      lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
+      lastEvent: "dispatch", heartbeatBudgetMs: 1000,
+      attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }] } });
     expect(launched).toEqual(["i10"]);
     expect(r.state).toBe("submitted"); // launcher owns the lifecycle, not failed
   });
@@ -155,11 +159,38 @@ describe("daemon handler", () => {
     const r: any = await d.handle({ kind: "dispatch", record: {
       id: "g9", project: "p", provider: "gemini", mode: "headless",
       state: "submitted", task: "go", createdAt: 1, lastHeartbeat: 1,
-      lastEvent: "dispatch", heartbeatBudgetMs: 1000 } });
+      lastEvent: "dispatch", heartbeatBudgetMs: 1000,
+      attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }] } });
     expect(r.state).toBe("submitted"); // dispatch returns immediately
     await new Promise((res) => setTimeout(res, 10)); // let the rejection settle
     const after = store.get("p", "g9");
     expect(after?.state).toBe("failed");
     expect(after?.error).toBe("no adapter for gemini");
+  });
+
+  // Regression: daemon must route provider=codex interactive dispatch to the
+  // injected launchInteractive hook (which cockpitd wires to CodexInteractiveDriver).
+  it("daemon routes codex interactive dispatch to the driver", async () => {
+    const calls: any[] = [];
+    const fakeDriver = {
+      dispatch: vi.fn().mockImplementation(async (rec: any) => { calls.push(["dispatch", rec.id]); }),
+      reattach: vi.fn(),
+      say: vi.fn(), steer: vi.fn(), interrupt: vi.fn(), answer: vi.fn(),
+    } as any;
+    const store = createStore(dir);
+    const d = createDaemon({
+      store, now: () => 1,
+      launchInteractive: (rec) =>
+        rec.provider === "codex"
+          ? fakeDriver.dispatch(rec)
+          : Promise.reject(new Error("unhandled")),
+    });
+    const record: any = {
+      id: "t1", project: "p", provider: "codex", mode: "interactive",
+      state: "submitted", task: "hi", createdAt: 1, lastHeartbeat: 1, lastEvent: "",
+      heartbeatBudgetMs: 1000, attempts: [{ attemptId: "a", startedAt: 1, lastHeartbeatAt: 1 }],
+    };
+    await d.handle({ kind: "dispatch", record });
+    expect(calls).toEqual([["dispatch", "t1"]]);
   });
 });
