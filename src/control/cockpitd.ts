@@ -3,12 +3,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawn as realSpawn } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createStore } from "./store.js";
 import { createDaemon } from "./daemon.js";
 import { startServer, encodeFrame, type AttachFrame, type AttachInbound } from "./protocol.js";
 import { runHeadless } from "./headless-launcher.js";
 import { CodexInteractiveDriver } from "./codex/driver.js";
-import type { TaskRecord } from "./types.js";
+import { makeGate } from "./codex/gate.js";
+import type { Gate, TaskRecord } from "./types.js";
 import type { Socket } from "node:net";
 
 export interface CockpitdOpts {
@@ -55,6 +57,50 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
     }
   }
 
+  // ── Gate promotion (spec §4.9) ────────────────────────────────────────────
+  // When a server-request event fires and no client is attached, start a 5s
+  // timer. If still unattached at fire time, promote to a Gate in the store
+  // and broadcast gate-promoted so any later-attaching client can offer takeover.
+  const pendingGateTimers = new Map<string, { taskId: string; timer: NodeJS.Timeout }>();
+
+  function schedulePromotion(
+    taskId: string,
+    requestId: number,
+    kind: "input" | "approval",
+    question: string,
+  ): void {
+    // If a client is already attached for this task, no promotion needed.
+    const conns = attachConns.get(taskId);
+    if (conns && conns.size > 0) return;
+    const key = `${taskId}#${requestId}`;
+    // Clear any prior timer for the same (taskId, requestId).
+    const prior = pendingGateTimers.get(key);
+    if (prior) clearTimeout(prior.timer);
+    const timer = setTimeout(() => {
+      pendingGateTimers.delete(key);
+      // Re-check at fire time — a client may have attached in the 5s window.
+      if (attachConns.get(taskId)?.size) return;
+      const rec = store.listAll().find((r) => r.id === taskId);
+      if (!rec) return;
+      const gate: Gate = makeGate({ taskId, kind, question, now: Date.now(), mkId: () => randomUUID() });
+      const gates = [...(rec.gates ?? []), gate];
+      store.put({ ...rec, gates });
+      broadcast(taskId, { type: "gate-promoted", taskId, gateId: gate.gateId });
+      log(`gate promoted gateId=${gate.gateId} taskId=${taskId} kind=${kind}`);
+    }, 5_000);
+    timer.unref?.();
+    pendingGateTimers.set(key, { taskId, timer });
+  }
+
+  function cancelPromotionsFor(taskId: string): void {
+    for (const [key, slot] of pendingGateTimers.entries()) {
+      if (slot.taskId === taskId) {
+        clearTimeout(slot.timer);
+        pendingGateTimers.delete(key);
+      }
+    }
+  }
+
   // ── CodexInteractiveDriver singleton ─────────────────────────────────────
   // The driver holds the single AppServerClient child. Each task maps to a
   // thread inside that child. Events emitted here (a) update the state-machine
@@ -74,10 +120,13 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
         broadcast(ev.id, { type: "turn-started", taskId: ev.id });
       else if (ev.type === "task.turn.completed")
         broadcast(ev.id, { type: "turn-completed", taskId: ev.id });
-      else if (ev.type === "task.input.requested")
+      else if (ev.type === "task.input.requested") {
         broadcast(ev.id, { type: "input-requested", taskId: ev.id, requestId: ev.requestId, question: ev.question });
-      else if (ev.type === "task.approval.requested")
+        schedulePromotion(ev.id, ev.requestId, "input", ev.question);
+      } else if (ev.type === "task.approval.requested") {
         broadcast(ev.id, { type: "approval-requested", taskId: ev.id, requestId: ev.requestId, question: ev.question, kind: ev.kind });
+        schedulePromotion(ev.id, ev.requestId, "approval", ev.question);
+      }
       else if (ev.type === "task.reattached")
         broadcast(ev.id, { type: "reattached", taskId: ev.id });
     },
@@ -113,6 +162,8 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       let set = attachConns.get(frame.taskId);
       if (!set) { set = new Set(); attachConns.set(frame.taskId, set); }
       set.add(conn);
+      // A client arriving within the 5s window defuses any pending gate timer.
+      cancelPromotionsFor(frame.taskId);
       // Immediately ack the attach so the client knows it's live.
       try { conn.write(encodeFrame({ type: "reattached", taskId: frame.taskId })); } catch { /* ignore */ }
     },
