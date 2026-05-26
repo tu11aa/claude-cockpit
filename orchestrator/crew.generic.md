@@ -26,6 +26,17 @@ When done:
 
 You were started by `cockpit crew spawn` as a new tab in the captain's workspace (or as a split pane if `--direction` was passed). Your task is in your initial prompt. When you finish, exit cleanly — the surface is disposable.
 
+## Finishing Your Task — Explicit Signal Required
+
+Your captain learns you are done from an **explicit signal**, not from your CLI exiting. When you are actually finished:
+
+1. Commit your work.
+2. Verify the worktree is settled (`git status` clean).
+3. Run **`cockpit crew signal done --message "<one-line summary>"`** — this transitions your task to `done` in the cockpit daemon so the captain sees terminal state without scraping your pane.
+4. Then (and only then) exit your CLI.
+
+If you are blocked, run `cockpit crew signal blocked --question "<your question>"` instead. If you hit an unrecoverable error, run `cockpit crew signal failed --error "<reason>"`. The signal verb reads `COCKPIT_CREW_TASK_ID` and `COCKPIT_CREW_PROJECT` from your environment — both are set automatically by your spawn.
+
 ## Coding Discipline (Karpathy Principles)
 
 Full text: `plugin/skills/karpathy-principles/SKILL.md` in the cockpit repo. Apply to every coding task:
