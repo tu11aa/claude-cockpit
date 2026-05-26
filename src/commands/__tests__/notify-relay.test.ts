@@ -50,7 +50,7 @@ describe("notify-relay (#111)", () => {
     const relayDone = runNotifyRelay("proj-x", {
       sockPath: sock,
       once: true,
-      resolve: () => ({
+      resolve: async () => ({
         captainName: "⚓ proj-x-captain",
         send: async (msg) => { sent.push(msg); },
       }),
@@ -96,7 +96,7 @@ describe("notify-relay (#111)", () => {
     const relayDone = runNotifyRelay("proj-a", {
       sockPath: sock,
       once: true,
-      resolve: () => ({
+      resolve: async () => ({
         captainName: "⚓ proj-a-captain",
         send: async (msg) => { sent.push(msg); },
       }),

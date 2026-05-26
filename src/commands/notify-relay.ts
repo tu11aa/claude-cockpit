@@ -24,8 +24,10 @@ const SOCK_PATH = join(homedir(), ".config", "cockpit", "cockpit.sock");
 interface RunOpts {
   sockPath?: string;
   // Test injection: builds the runtime + resolves captain name. Defaults to the
-  // production config loader + cmux driver.
-  resolve?: (project: string) => { captainName: string; send: (msg: string) => Promise<void> };
+  // production config loader + cmux driver. The returned `send` must already
+  // be bound to the captain's runtime-native ref (workspace ID), because
+  // cmux's driver.send() expects an ID, not a name.
+  resolve?: (project: string) => Promise<{ captainName: string; send: (msg: string) => Promise<void> }>;
   // Test injection: when true, exit after the first daemon-end (no reconnect loop).
   once?: boolean;
   // Test injection: backoff override (ms). Production uses 1s/2s/4s capped at 30s.
@@ -42,19 +44,25 @@ export async function runNotifyRelay(project: string, opts: RunOpts = {}): Promi
   const log = opts.log ?? ((m: string) => process.stdout.write(`[notify-relay ${project}] ${m}\n`));
   const backoff = opts.backoffMs ?? defaultBackoff;
 
-  const resolve = opts.resolve ?? (() => {
+  const resolve = opts.resolve ?? (async () => {
     const config = loadConfig();
     const proj = config.projects[project];
     if (!proj) throw new Error(`Project '${project}' not found in config`);
     const registry = new RuntimeRegistry({ cmux: createCmuxDriver() });
     const driver = registry.forProject(project, config);
+    // RuntimeDriver.send() expects the runtime-native ref (e.g. cmux's
+    // "workspace:N"), not the human name — resolve once at startup.
+    const ref = await driver.status(proj.captainName);
+    if (!ref) {
+      throw new Error(`Captain workspace '${proj.captainName}' not found in runtime '${driver.name}'`);
+    }
     return {
       captainName: proj.captainName,
-      send: (msg: string) => driver.send(proj.captainName, msg),
+      send: (msg: string) => driver.send(ref.id, msg),
     };
   });
 
-  const r = resolve(project);
+  const r = await resolve(project);
   log(`relaying to captain '${r.captainName}' via socket ${sockPath}`);
 
   let attempt = 0;
