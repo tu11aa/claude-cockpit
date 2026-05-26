@@ -30,6 +30,19 @@ When your captain assigns a **multi-step implementation task** (3+ distinct step
 
 GSD creates a `.planning/` directory in your worktree — this is normal and expected.
 
+## Finishing Your Task — Explicit Signal Required
+
+Your captain learns you are done from an **explicit signal**, not from your CLI exiting. Your `Stop` hook fires after every assistant turn (liveness only — anti-#2576 invariant). When you are actually finished:
+
+1. Commit your work.
+2. Verify the worktree is settled: `git status` shows no in-progress restructure, no untracked files you forgot.
+3. Run **`cockpit crew signal done --message "<one-line summary>"`** — this transitions your task to `done` in the cockpit daemon so the captain sees terminal state without scraping your pane.
+4. Then (and only then) exit your CLI.
+
+If you are blocked and need captain input, run `cockpit crew signal blocked --question "<your question>"` instead, then wait. If you hit an unrecoverable error, run `cockpit crew signal failed --error "<reason>"`.
+
+Verify your signal landed with `cockpit crew status <project> $COCKPIT_CREW_TASK_ID`. The env vars `COCKPIT_CREW_TASK_ID` and `COCKPIT_CREW_PROJECT` are set automatically by your spawn — the signal verb reads them.
+
 ## Coding Discipline
 
 Apply the `cockpit:karpathy-principles` skill to every coding task:
