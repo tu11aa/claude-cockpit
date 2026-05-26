@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { sendRequest } from "../control/protocol.js";
 import { ensureDaemon } from "../control/launchd.js";
 import type { Mode, Provider, TaskRecord } from "../control/types.js";
+import { mapClaudeHookToEvent } from "../control/interactive/claude.js";
 import { crewAttachCommand } from "./crew-attach.js";
 import { crewChatCommand } from "./crew-chat.js";
 
@@ -160,13 +161,37 @@ export function addControlPlaneCrewCommands(crew: Command): void {
       process.stdout.write(JSON.stringify(r) + "\n");
     });
 
-  // TODO(downstream interactive-wiring spec): not yet functional — no-op stub.
+  // Bridge from Claude's native Stop/SubagentStop/SessionEnd hooks to the
+  // cockpit control plane. Reads hook payload JSON on stdin (Claude hook
+  // contract); env-gated on COCKPIT_CREW_TASK_ID/COCKPIT_CREW_PROJECT so the
+  // hook is a no-op outside spawned crews. Anti-#2576: maps only to
+  // task.progress (liveness), never task.done — terminal state comes from
+  // `cockpit crew signal` (explicit, post-settle-check).
   crew
     .command("_hook <event>", { hidden: true })
-    .description("internal: invoked by injected agent hooks (deferred — not yet functional)")
+    .description("internal: bridge from claude Stop/SubagentStop/SessionEnd hooks to cockpitd")
     .action(async (event: string) => {
-      // hook payload arrives on stdin (Claude hook JSON); minimal: emit progress.
-      process.stdout.write(`hook:${event}\n`);
+      const taskId = process.env.COCKPIT_CREW_TASK_ID;
+      const project = process.env.COCKPIT_CREW_PROJECT;
+      if (!taskId || !project) { process.exit(0); }
+      // Drain stdin (Claude posts hook JSON there). Tolerate missing/malformed.
+      let stdin = "";
+      try {
+        for await (const chunk of process.stdin) stdin += chunk;
+      } catch { /* ignore */ }
+      let payload: unknown = undefined;
+      if (stdin.trim()) {
+        try { payload = JSON.parse(stdin); } catch { /* ignore malformed */ }
+      }
+      const ev = mapClaudeHookToEvent(event, payload, taskId);
+      if (!ev) { process.exit(0); }
+      try {
+        await cockpitdCall({ kind: "event", project, event: ev });
+      } catch {
+        // Daemon down: do NOT block Claude. Hook contract requires exit 0;
+        // a non-zero exit would block the conversation.
+      }
+      process.exit(0);
     });
 
   crew.addCommand(crewAttachCommand);

@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import type { InteractiveHookAdapter } from "./types.js";
+import type { ControlEvent } from "../types.js";
 
 const EVENTS = ["Stop", "SubagentStop", "SessionEnd"] as const;
 
@@ -34,6 +35,28 @@ export function mergeClaudeHooks(settings: any, hookCmd: string): any {
     }
   }
   return next;
+}
+
+/**
+ * Map a Claude hook event name to a cockpit ControlEvent. Pure function —
+ * isolated for testability and to codify the anti-#2576 invariant in one
+ * place: NO Claude hook ever maps to `task.done`/`task.failed`/`task.blocked`.
+ * Bare Stop/SubagentStop/SessionEnd = liveness only. Terminal state comes
+ * exclusively from explicit `cockpit crew signal` (Task 4).
+ */
+export function mapClaudeHookToEvent(
+  event: string,
+  _payload: unknown,
+  taskId: string,
+): ControlEvent | null {
+  switch (event) {
+    case "Stop":
+    case "SubagentStop":
+    case "SessionEnd":
+      return { type: "task.progress", id: taskId, note: event.toLowerCase() };
+    default:
+      return null;
+  }
 }
 
 export const claudeInteractive: InteractiveHookAdapter = {
