@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { appendToMailbox } from "../mailbox.js";
 import { readCursor, writeCursor } from "../mailbox.js";
 import { readFromCursor } from "../mailbox.js";
+import { rotateIfNeeded } from "../mailbox.js";
+import { statSync } from "node:fs";
 import type { TaskRecord, ControlEvent } from "../types.js";
 
 function freshState(): string {
@@ -172,5 +174,61 @@ describe("readFromCursor", () => {
     await (await import("node:fs/promises")).appendFile(file, '{"seq":2,"ts":"2026', "utf-8");
     const items = await collect(readFromCursor({ stateRoot, project: "demo", fromSeq: 1 }));
     expect(items.map((i) => i.seq)).toEqual([1]);
+  });
+});
+
+describe("rotateIfNeeded", () => {
+  it("returns rotated=false when file under thresholds", async () => {
+    const stateRoot = freshState();
+    await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+    const r = await rotateIfNeeded({ stateRoot, project: "demo", maxBytes: 1024 * 1024, maxAgeMs: 24 * 60 * 60 * 1000, keepCount: 3 });
+    expect(r.rotated).toBe(false);
+  });
+
+  it("rotates when size exceeds maxBytes", async () => {
+    const stateRoot = freshState();
+    for (let i = 0; i < 10; i++) {
+      await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+    }
+    const sizeBefore = statSync(join(stateRoot, "inbox", "demo.log")).size;
+    expect(sizeBefore).toBeGreaterThan(200);
+    const r = await rotateIfNeeded({ stateRoot, project: "demo", maxBytes: 200, maxAgeMs: 999999999, keepCount: 3 });
+    expect(r.rotated).toBe(true);
+    expect(existsSync(join(stateRoot, "inbox", "demo.log.1"))).toBe(true);
+    expect(statSync(join(stateRoot, "inbox", "demo.log")).size).toBe(0);
+  });
+
+  it("seq is monotonic across rotation boundary", async () => {
+    const stateRoot = freshState();
+    for (let i = 0; i < 10; i++) {
+      await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+    }
+    await rotateIfNeeded({ stateRoot, project: "demo", maxBytes: 200, maxAgeMs: 999999999, keepCount: 3 });
+    const s = await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+    expect(s).toBe(11);
+  });
+
+  it("keeps only keepCount rotated files", async () => {
+    const stateRoot = freshState();
+    for (let cycle = 0; cycle < 5; cycle++) {
+      for (let i = 0; i < 5; i++) {
+        await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+      }
+      await rotateIfNeeded({ stateRoot, project: "demo", maxBytes: 100, maxAgeMs: 999999999, keepCount: 2 });
+    }
+    expect(existsSync(join(stateRoot, "inbox", "demo.log.1"))).toBe(true);
+    expect(existsSync(join(stateRoot, "inbox", "demo.log.2"))).toBe(true);
+    expect(existsSync(join(stateRoot, "inbox", "demo.log.3"))).toBe(false);
+  });
+
+  it("readFromCursor reads across rotated files", async () => {
+    const stateRoot = freshState();
+    for (let i = 0; i < 5; i++) {
+      await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+    }
+    await rotateIfNeeded({ stateRoot, project: "demo", maxBytes: 50, maxAgeMs: 999999999, keepCount: 3 });
+    await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
+    const items = await collect(readFromCursor({ stateRoot, project: "demo", fromSeq: 1 }));
+    expect(items.map((i) => i.seq)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 });
