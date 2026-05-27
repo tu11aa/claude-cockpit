@@ -99,6 +99,22 @@ try {
   assert(items2[0]?.kind === "task.done", `seq=2 is task.done`);
   assert(items2[1]?.kind === "task.blocked", `seq=3 is task.blocked`);
 
+  record("\n[5] liveness events (task.started, task.progress) do NOT write to mailbox");
+  // firePush gates on ATTENTION_STATES = {done, blocked, failed, stalled}.
+  // task.started / task.progress drive working state → must be suppressed.
+  await sendRequest(sock, { kind: "seed", record: baseRec("smoke-4cafebabe", { state: "submitted" }) });
+  await sendRequest(sock, { kind: "event", project: "demo",
+    event: { type: "task.started", id: "smoke-4cafebabe" } });
+  await sendRequest(sock, { kind: "event", project: "demo",
+    event: { type: "task.progress", id: "smoke-4cafebabe" } });
+  await sendRequest(sock, { kind: "event", project: "demo",
+    event: { type: "task.progress", id: "smoke-4cafebabe" } });
+  await new Promise((r) => setTimeout(r, 200));
+
+  const linesAfter = readFileSync(logPath, "utf-8").trim().split("\n").filter(Boolean);
+  assert(linesAfter.length === 3,
+    `mailbox still has 3 entries after liveness traffic (got ${linesAfter.length}) — liveness suppressed`);
+
   record(`\n${failures === 0 ? "✔ ALL SMOKE ASSERTIONS PASSED" : `✗ ${failures} FAILURES`}`);
 } finally {
   handle.stop();
