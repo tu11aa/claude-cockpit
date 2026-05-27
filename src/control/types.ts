@@ -79,7 +79,12 @@ export type ControlEvent =
   | { type: "task.delta"; id: string; turnId: string; chunk: string }
   | { type: "task.input.requested"; id: string; requestId: number; question: string }
   | { type: "task.approval.requested"; id: string; requestId: number; question: string; kind: string }
-  | { type: "task.reattached"; id: string };
+  | { type: "task.reattached"; id: string }
+  // Synthetic events: emitted by the daemon (watchdog / reconcile) purely as
+  // notify payloads. They are never sent over the wire and the reducer treats
+  // them as no-ops; the watchdog has already updated state directly.
+  | { type: "task.stalled"; id: string; heartbeatBudgetMs: number }
+  | { type: "task.reconcile-failed"; id: string; reason: string };
 
 // 'stalled' is intentionally excluded — recoverable by the watchdog.
 export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([
