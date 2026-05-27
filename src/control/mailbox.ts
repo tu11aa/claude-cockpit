@@ -6,6 +6,9 @@ export interface MailboxEntry {
   seq: number;
   ts: string;
   taskId: string;
+  /** Optional human-readable name carried from TaskRecord. Absent on legacy
+   *  records — readers must fall back to shortId(taskId). */
+  name?: string;
   kind: ControlEvent["type"];
   provider: TaskRecord["provider"];
   payload: Record<string, unknown>;
@@ -105,6 +108,7 @@ export async function appendToMailbox(opts: AppendOpts): Promise<number> {
       seq,
       ts: new Date().toISOString(),
       taskId: opts.taskRecord.id,
+      ...(opts.taskRecord.name !== undefined ? { name: opts.taskRecord.name } : {}),
       kind: opts.event.type,
       provider: opts.taskRecord.provider,
       payload: extractPayload(opts.event),

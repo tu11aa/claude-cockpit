@@ -28,7 +28,7 @@ function shortId(id: string): string {
 }
 
 export function formatEntry(entry: MailboxEntry): string | null {
-  const tag = `[${entry.provider}/${shortId(entry.taskId)}]`;
+  const tag = `[${entry.provider}/${entry.name != null ? entry.name : shortId(entry.taskId)}]`;
   switch (entry.kind) {
     case "task.started":
     case "task.progress":

@@ -45,7 +45,7 @@ function shortId(id: string): string {
 }
 
 function formatMessage(rec: TaskRecord): string | null {
-  const tag = `[${rec.provider}/${shortId(rec.id)}]`;
+  const tag = `[${rec.provider}/${rec.name != null ? rec.name : shortId(rec.id)}]`;
   switch (rec.state) {
     case "done": {
       // Spec: "<resultRef-content-first-line-or-the-task-snippet>".

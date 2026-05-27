@@ -35,6 +35,10 @@ export interface Gate {
 
 export interface TaskRecord {
   id: string;
+  /** Human-readable crew name (e.g. the `--name` arg to `cockpit crew spawn`).
+   *  Optional for backward-compat with records written before this field
+   *  existed; relay/daemon fall back to the short id when absent. */
+  name?: string;
   project: string;
   provider: Provider;
   mode: Mode;
