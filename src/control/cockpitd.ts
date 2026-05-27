@@ -10,7 +10,8 @@ import { startServer, encodeFrame, type AttachFrame, type AttachInbound } from "
 import { runHeadless } from "./headless-launcher.js";
 import { CodexInteractiveDriver } from "./codex/driver.js";
 import { makeGate } from "./codex/gate.js";
-import type { Gate, TaskRecord } from "./types.js";
+import { appendToMailbox } from "./mailbox.js";
+import type { Gate, TaskRecord, ControlEvent } from "./types.js";
 import type { Socket } from "node:net";
 
 export interface CockpitdOpts {
@@ -25,7 +26,12 @@ export interface CockpitdOpts {
    * project→captain workspace lookup via NotifierRegistry + config).
    * Tests inject a fake to assert call shape without spawning.
    */
-  notify?: (args: { project: string; message: string }) => Promise<void> | void;
+  notify?: (args: {
+    project: string;
+    message: string;
+    record: TaskRecord;
+    event: ControlEvent;
+  }) => Promise<void> | void;
   /** Inject a fake driver for tests. Defaults to a real CodexInteractiveDriver. */
   codexDriver?: import("./codex/driver.js").CodexInteractiveDriver | {
     dispatch: (rec: any) => Promise<void>;
@@ -178,15 +184,30 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   const ingest = (project: string) => (e: import("./types.js").ControlEvent) =>
     void d.handle({ kind: "event", project, event: e });
 
-  // Default push-notification wiring (#109 + #111): the daemon CANNOT shell
-  // out to cmux directly — cmux's CLI rejects any caller not descended from
-  // its app process, and the daemon's parent is launchd (or any detached
-  // subprocess), never cmux. Instead the daemon broadcasts push frames to
-  // `subscribe-notify` clients (the `cockpit notify-relay <project>` tab
-  // running inside the captain workspace) and appends to a durable inbox
-  // file for record/debug. Tests inject a fake `notify` to assert call
-  // shape without exercising this delivery path.
-  const defaultNotify = (args: { project: string; message: string }): void => {
+  // Default push-notification wiring (mailbox-injector spec): the daemon
+  // appends a JSON entry to <stateRoot>/inbox/<project>.log. An injector
+  // process running inside the captain workspace tails the file from its
+  // cursor and delivers each entry to the captain pane. The daemon never
+  // shells out to cmux; the captain owns delivery. Tests inject a fake
+  // `notify` to assert call shape without exercising the mailbox path.
+  const defaultNotify = async (args: {
+    project: string;
+    message: string;
+    record: TaskRecord;
+    event: ControlEvent;
+  }): Promise<void> => {
+    try {
+      await appendToMailbox({
+        stateRoot,
+        project: args.project,
+        taskRecord: args.record,
+        event: args.event,
+      });
+    } catch (e) {
+      log(`mailbox append failed project=${args.project}: ${(e as Error).message}`);
+    }
+    // Legacy push-frame broadcast preserved for PR #112's relay tab during the
+    // bridge state. Removed in Task 8 once the file-tailer injector replaces it.
     pushNotify(args.project, args.message);
   };
   const notify = opts.notify ?? defaultNotify;
