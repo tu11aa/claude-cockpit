@@ -78,4 +78,23 @@ describe("appendToMailbox", () => {
     const s3 = await appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent });
     expect(s3).toBe(3);
   });
+
+  it("assigns unique monotonic seq under concurrent appends (no TOCTOU race)", async () => {
+    const stateRoot = freshState();
+    // Fire 20 concurrent appends; with a TOCTOU race some would get duplicate seqs
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        appendToMailbox({ stateRoot, project: "demo", taskRecord: sampleRecord, event: doneEvent })
+      )
+    );
+    // All seqs unique, exactly 1..20
+    const sorted = [...results].sort((a, b) => a - b);
+    expect(sorted).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    // File has exactly 20 lines, all parseable, with seqs 1..20
+    const logPath = join(stateRoot, "inbox", "demo.log");
+    const lines = readFileSync(logPath, "utf-8").trim().split("\n");
+    expect(lines).toHaveLength(20);
+    const seqs = lines.map((l) => JSON.parse(l).seq as number).sort((a, b) => a - b);
+    expect(seqs).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+  });
 });

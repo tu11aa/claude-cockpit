@@ -49,20 +49,41 @@ async function readMaxSeq(file: string): Promise<number> {
   }
 }
 
+// Per-project serial mutex. Node's event loop is single-threaded but async
+// readFile + writeFile can interleave; chaining all appends for the same
+// project through a single in-process Promise serializes them.
+//
+// For cross-process serialization (multi-daemon scenarios, e.g. launchctl
+// restart races), an OS-level flock would be needed on `<project>.log`.
+// Today cockpit runs a single daemon instance; the in-process mutex covers
+// the realistic concurrency model. flock can be added later if multi-process
+// access becomes a requirement.
+const projectLocks = new Map<string, Promise<unknown>>();
+
+function withProjectLock<T>(project: string, fn: () => Promise<T>): Promise<T> {
+  const prev = projectLocks.get(project) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  // Store a tail that does not reject so the chain never breaks on caller failure
+  projectLocks.set(project, next.catch(() => undefined));
+  return next;
+}
+
 export async function appendToMailbox(opts: AppendOpts): Promise<number> {
-  const dir = inboxDir(opts.stateRoot);
-  await fs.mkdir(dir, { recursive: true });
-  const file = logPath(opts.stateRoot, opts.project);
-  const lastSeq = await readMaxSeq(file);
-  const seq = lastSeq + 1;
-  const entry: MailboxEntry = {
-    seq,
-    ts: new Date().toISOString(),
-    taskId: opts.taskRecord.id,
-    kind: opts.event.type,
-    provider: opts.taskRecord.provider,
-    payload: extractPayload(opts.event),
-  };
-  await fs.appendFile(file, JSON.stringify(entry) + "\n", { encoding: "utf-8" });
-  return seq;
+  return withProjectLock(opts.project, async () => {
+    const dir = inboxDir(opts.stateRoot);
+    await fs.mkdir(dir, { recursive: true });
+    const file = logPath(opts.stateRoot, opts.project);
+    const lastSeq = await readMaxSeq(file);
+    const seq = lastSeq + 1;
+    const entry: MailboxEntry = {
+      seq,
+      ts: new Date().toISOString(),
+      taskId: opts.taskRecord.id,
+      kind: opts.event.type,
+      provider: opts.taskRecord.provider,
+      payload: extractPayload(opts.event),
+    };
+    await fs.appendFile(file, JSON.stringify(entry) + "\n", { encoding: "utf-8" });
+    return seq;
+  });
 }
