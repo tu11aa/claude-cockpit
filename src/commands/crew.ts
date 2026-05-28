@@ -214,7 +214,11 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     const pane = await runtime.newPane({ workspaceId: captain.id, direction, title });
     // Prefix the CLI command with env so the hook bridge + signal verb
     // running inside the crew's cmux tab can identify their task.
-    const envPrefix = `COCKPIT_CREW_TASK_ID=${rec.id} COCKPIT_CREW_PROJECT=${input.project}`;
+    // CMUX_CLAUDE_HOOKS_DISABLED=1 prevents the cmux claude wrapper
+    // (/Applications/cmux.app/Contents/Resources/bin/claude) from
+    // appending its own --settings after the per-crew one, which would
+    // overwrite the cockpit hooks object (#134).
+    const envPrefix = `CMUX_CLAUDE_HOOKS_DISABLED=1 COCKPIT_CREW_TASK_ID=${rec.id} COCKPIT_CREW_PROJECT=${input.project}`;
     await runtime.sendToPane(pane, `${envPrefix} ${cliCommand}`);
     await new Promise((r) => setTimeout(r, CLI_BOOT_DELAY_MS));
     await runtime.sendToPane(pane, input.task);
