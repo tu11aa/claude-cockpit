@@ -47,7 +47,7 @@ describe("cmux driver", () => {
         return [
           "workspace:1  🏛️ command  (running)",
           "workspace:2  brove-captain  [selected]",
-          "workspace:3  ⚡ reactor  (running)",
+          "workspace:3  scaffold-captain  (running)",
         ].join("\n");
       }
       return "";

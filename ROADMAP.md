@@ -59,6 +59,7 @@ Cockpit v0.1.x is a working multi-project agent orchestration system with:
 **Effort:** ~1-2 hours (config + template changes)
 
 #### 5. CI Feedback Reactor Extension
+**Status:** ❌ Dropped (2026-05-28) — the reactor subsystem was removed from cockpit, so there is no reactor architecture to extend.
 **Why:** Composio AO auto-routes CI failures back to agents. Cockpit reactor detects CI failure but only notifies — doesn't auto-fix.
 **What:**
 - New reaction action: `auto-fix-ci` — on CI failure, re-delegate to captain with failure logs
@@ -107,6 +108,7 @@ Cockpit v0.1.x is a working multi-project agent orchestration system with:
 **Effort:** ~2-3 hours
 
 #### 9. Linear Integration
+**Status:** ❌ Dropped (2026-05-28) — depended on the reactor source/polling model, which has been removed from cockpit.
 **Why:** Composio AO supports Linear+GitHub+GitLab. Cockpit only has GitHub reactor. Some projects may use Linear for tracking.
 **What:**
 - New reactor source: `linear-issues` (poll via Linear MCP tools already available)
