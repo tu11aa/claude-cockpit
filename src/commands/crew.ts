@@ -216,8 +216,10 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     // running inside the crew's cmux tab can identify their task.
     // CMUX_CLAUDE_HOOKS_DISABLED=1 prevents the cmux claude wrapper
     // (/Applications/cmux.app/Contents/Resources/bin/claude) from
-    // appending its own --settings after the per-crew one, which would
-    // overwrite the cockpit hooks object (#134).
+    // injecting --settings <inline-json> before the per-crew --settings
+    // <file>. Under --session-id, claude silently ignores a file-path
+    // --settings when preceded by an inline-JSON --settings, dropping
+    // all cockpit hooks (#134).
     const envPrefix = `CMUX_CLAUDE_HOOKS_DISABLED=1 COCKPIT_CREW_TASK_ID=${rec.id} COCKPIT_CREW_PROJECT=${input.project}`;
     await runtime.sendToPane(pane, `${envPrefix} ${cliCommand}`);
     await new Promise((r) => setTimeout(r, CLI_BOOT_DELAY_MS));
