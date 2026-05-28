@@ -17,7 +17,7 @@ import {
 import type { PaneRef, PanePlacement, RuntimeDriver } from "../runtimes/types.js";
 import { buildDispatchRequest, cockpitdCall, sendCodexFirstTurn } from "./crew-control.js";
 import { writePerCrewSettingsLocal, writePerCrewOpencodeConfig } from "../lib/per-crew-settings.js";
-import type { TaskRecord } from "../control/types.js";
+import { TERMINAL_STATES, type TaskRecord } from "../control/types.js";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 
@@ -337,6 +337,18 @@ export async function runCrewSend(project: string, name: string, message: string
   const crew = await findCrew(runtime, workspaceId, project, name);
   if (!crew) {
     throw new Error(`Crew '${name}' not found for ${project}. Run 'cockpit crew list ${project}'.`);
+  }
+  // Best-effort: if the daemon task for this crew is terminal, reopen it so
+  // the next signal done is a real transition and fires CREW DONE (#148).
+  try {
+    const tasks = (await cockpitdCall({ kind: "list", project })) as TaskRecord[];
+    const task = tasks.find((t) => t.name === name && TERMINAL_STATES.has(t.state));
+    if (task) {
+      await cockpitdCall({ kind: "event", project, event: { type: "task.reopened", id: task.id } });
+    }
+  } catch {
+    // Swallow daemon errors so crews without a daemon or offline daemon
+    // still receive the sent message.
   }
   await runtime.sendToPane(crew, message);
 }
