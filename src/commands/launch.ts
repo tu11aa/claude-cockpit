@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -18,6 +18,18 @@ const CMUX_APP = "/Applications/cmux.app";
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 const SESSIONS_PATH = path.join(os.homedir(), ".config", "cockpit", "sessions.json");
+
+// Direct cmux invocation for the select-workspace / current-workspace calls
+// not yet abstracted behind RuntimeDriver. Uses execFileSync (no shell) with
+// stderr piped, NOT inherited — cmux prints diagnostics like
+// "Error: not_found: Pane not found" to stderr and exits 0 when focusing a
+// surface that vanished mid-launch (e.g. --fresh closes a stale workspace).
+// The default execSync/execFileSync stdio forwards that stderr to the parent
+// terminal, which is exactly the #121 Issue B leak. Capturing fd 2 here
+// swallows it. Returns trimmed stdout for callers that need it.
+export function cmuxLocal(args: string[]): string {
+  return execFileSync(CMUX_BIN, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
 
 interface SessionRecord {
   lastLaunched: string; // YYYY-MM-DD
@@ -222,14 +234,14 @@ async function launchWorkspace(
     console.log(chalk.yellow(`  Workspace '${name}' already exists — switching to it`));
     if (notifyRelayProject) await ensureNotifyRelayTab(runtime, existing, notifyRelayProject);
     // TODO(runtime): select/focus not yet abstracted; direct cmux call retained intentionally
-    execSync(`"${CMUX_BIN}" select-workspace --workspace "${existing.id}"`);
+    cmuxLocal(["select-workspace", "--workspace", existing.id]);
     return;
   }
 
   let currentRef: string | undefined;
   try {
     // TODO(runtime): current-workspace not yet abstracted
-    const cur = execSync(`"${CMUX_BIN}" current-workspace`, { encoding: "utf-8" }).trim();
+    const cur = cmuxLocal(["current-workspace"]);
     currentRef = cur.match(/workspace:\d+/)?.[0];
   } catch { /* ignore */ }
 
@@ -251,10 +263,10 @@ async function launchWorkspace(
 
   if (navigate) {
     // TODO(runtime): select not yet abstracted
-    execSync(`"${CMUX_BIN}" select-workspace --workspace "${ref.id}"`);
+    cmuxLocal(["select-workspace", "--workspace", ref.id]);
   } else if (currentRef) {
     // TODO(runtime): select not yet abstracted
-    execSync(`"${CMUX_BIN}" select-workspace --workspace "${currentRef}"`);
+    cmuxLocal(["select-workspace", "--workspace", currentRef]);
   }
 
   console.log(chalk.green(`  ✔ Workspace '${name}' created`));
