@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Reactor subsystem and status-writing scripts.** The GitHub reaction engine
+  and auto-status poller have been removed: the `cockpit reactor` command,
+  `src/reactor/`, the reactor shell scripts (`poll-github.sh`,
+  `match-reactions.sh`, `execute-reaction.sh`, `reactor-cycle.sh`),
+  `reactions.json`, the reaction config types (`ReactionsConfig`, `ReactionRule`,
+  `ReactionTrigger`, `AutoStatusConfig`) and `loadReactions`/`saveReactions`, the
+  `reactor` role (model routing, permission, driver requirements), and the
+  `reactor-ops` skill. Because the auto-status poller was the writer of
+  `{spokeVault}/status.md`, the status-writing scripts went with it:
+  `write-status.sh`, `read-status.sh`, and the `status-writer.sh` hook. The
+  dashboard now reads live state from the cockpit daemon's task records rather
+  than from `status.md`. `cockpit launch --all` now launches captains only.
 - **Aider runtime driver and support.** The `aider` driver, its tests, and all
   spawn/launch/doctor/template wiring have been removed. Aider was never wired
   into `src/config.ts` and saw no active use; cockpit's supported agents are now
