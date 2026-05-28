@@ -440,6 +440,7 @@ describe("cockpit crew send/read/close/list", () => {
     loadConfig.mockReset();
     loadConfig.mockReturnValue(baseConfig);
     status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    cockpitdCall.mockReset();
   });
 
   it("send delivers a message to the matching crew tab", async () => {
@@ -459,6 +460,74 @@ describe("cockpit crew send/read/close/list", () => {
     listSurfaces.mockResolvedValue([]);
     await expect(runCrewSend("brove", "ghost", "msg"))
       .rejects.toThrow(/Crew 'ghost' not found/);
+  });
+
+  it("send emits task.reopened when the crew's daemon task is terminal", async () => {
+    listSurfaces.mockResolvedValue([
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+    ]);
+    // Simulate a daemon with a done task matching the crew name.
+    cockpitdCall.mockImplementation(async (req: unknown) => {
+      const r = req as { kind: string; project?: string };
+      if (r.kind === "list") {
+        return [{ id: "task-done-1", name: "crew-1", project: "brove", state: "done", provider: "claude", mode: "interactive", task: "old task", createdAt: 1000, lastHeartbeat: 1000, lastEvent: "task.done", heartbeatBudgetMs: 300000, attempts: [] }];
+      }
+      return undefined;
+    });
+
+    await runCrewSend("brove", "crew-1", "follow up");
+
+    // Should have called list then event (task.reopened)
+    expect(cockpitdCall).toHaveBeenCalledWith(expect.objectContaining({ kind: "list", project: "brove" }));
+    expect(cockpitdCall).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "event",
+      project: "brove",
+      event: { type: "task.reopened", id: "task-done-1" },
+    }));
+    expect(sendToPane).toHaveBeenCalledWith(
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+      "follow up",
+    );
+  });
+
+  it("send does NOT emit task.reopened when the crew's task is working (non-terminal)", async () => {
+    listSurfaces.mockResolvedValue([
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+    ]);
+    cockpitdCall.mockImplementation(async (req: unknown) => {
+      const r = req as { kind: string };
+      if (r.kind === "list") {
+        return [{ id: "task-w-1", name: "crew-1", project: "brove", state: "working", provider: "claude", mode: "interactive", task: "current", createdAt: 2000, lastHeartbeat: 2000, lastEvent: "task.started", heartbeatBudgetMs: 300000, attempts: [] }];
+      }
+      return undefined;
+    });
+
+    await runCrewSend("brove", "crew-1", "follow up");
+
+    // Only one call to cockpitdCall — the list to check state; no event emitted.
+    const callKinds = (cockpitdCall.mock.calls as Array<[{ kind: string }]>)
+      .map(([req]) => req.kind);
+    expect(callKinds).toEqual(["list"]);
+    expect(sendToPane).toHaveBeenCalledWith(
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+      "follow up",
+    );
+  });
+
+  it("send tolerates daemon being down (best-effort, caught)", async () => {
+    listSurfaces.mockResolvedValue([
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+    ]);
+    // Daemon throws on every call.
+    cockpitdCall.mockRejectedValue(new Error("daemon unreachable"));
+
+    await runCrewSend("brove", "crew-1", "follow up");
+
+    // sendToPane still fires even with daemon errors.
+    expect(sendToPane).toHaveBeenCalledWith(
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+      "follow up",
+    );
   });
 
   it("read returns the crew's screen content", async () => {

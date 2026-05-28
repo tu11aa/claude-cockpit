@@ -67,6 +67,57 @@ describe("state-machine reduce", () => {
     expect(next).toBe(done); // same reference — no-op
   });
 
+  it("task.reopened revives done → working, clears question and error", () => {
+    const d = rec({ state: "done", resultRef: "/r", question: "old question", error: undefined });
+    const next = reduce(d, { type: "task.reopened", id: "t1" }, 7000);
+    expect(next.state).toBe("working");
+    expect(next.question).toBeUndefined();
+    expect(next.error).toBeUndefined();
+    expect(next.lastHeartbeat).toBe(7000);
+    expect(next.lastEvent).toBe("task.reopened");
+    // resultRef is preserved even after reopen (informational)
+    expect(next.resultRef).toBe("/r");
+  });
+
+  it("task.reopened revives failed → working, clears error", () => {
+    const f = rec({ state: "failed", error: "boom", exitCode: 1 });
+    const next = reduce(f, { type: "task.reopened", id: "t1" }, 8000);
+    expect(next.state).toBe("working");
+    expect(next.error).toBeUndefined();
+    expect(next.exitCode).toBe(1); // preserved, informational
+    expect(next.lastEvent).toBe("task.reopened");
+  });
+
+  it("task.reopened on working stays working (already active)", () => {
+    const w = rec({ state: "working" });
+    const next = reduce(w, { type: "task.reopened", id: "t1" }, 9000);
+    expect(next.state).toBe("working");
+    expect(next.lastHeartbeat).toBe(9000);
+    expect(next.lastEvent).toBe("task.reopened");
+  });
+
+  it("task.reopened on stalled transitions to working", () => {
+    const s = rec({ state: "stalled" });
+    const next = reduce(s, { type: "task.reopened", id: "t1" }, 10000);
+    expect(next.state).toBe("working");
+    expect(next.lastEvent).toBe("task.reopened");
+  });
+
+  it("task.reopened on blocked transitions to working, clears question", () => {
+    const b = rec({ state: "blocked", question: "which path?" });
+    const next = reduce(b, { type: "task.reopened", id: "t1" }, 11000);
+    expect(next.state).toBe("working");
+    expect(next.question).toBeUndefined();
+    expect(next.lastEvent).toBe("task.reopened");
+  });
+
+  it("terminal state STILL absorbs non-reopened events after task.reopened handling", () => {
+    // Regression: opening one event does not disable the absorbing guard.
+    const done = rec({ state: "done", resultRef: "/r" });
+    const next = reduce(done, { type: "heartbeat", id: "t1" }, 12000);
+    expect(next).toBe(done); // same reference — no-op
+  });
+
   it("task.progress on working stays working (liveness tick, never terminal)", () => {
     const next = reduce(rec({ state: "working" }), { type: "task.progress", id: "t1", note: "PostToolUse" }, 7000);
     expect(next.state).toBe("working");

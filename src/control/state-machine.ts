@@ -23,6 +23,13 @@ function stampAttempt(
  * Returns a new record; never mutates the input.
  */
 export function reduce(rec: TaskRecord, ev: ControlEvent, now: number): TaskRecord {
+  // task.reopened is the ONE event allowed to escape a terminal state.
+  // From ANY state (done/failed/stalled/awaiting-input/working) → working.
+  // Clears question and error so the revived task looks fresh.
+  if (ev.type === "task.reopened") {
+    return { ...rec, state: "working", question: undefined, error: undefined, lastHeartbeat: now, lastEvent: ev.type };
+  }
+
   // Terminal states are absorbing: ignore any late/duplicate event idempotently.
   if (TERMINAL_STATES.has(rec.state)) return rec;
 
