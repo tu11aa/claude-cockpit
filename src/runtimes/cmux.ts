@@ -1,10 +1,13 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import type { RuntimeDriver, RuntimeProbeResult, RuntimeSpawnOptions, WorkspaceRef, PaneRef, RuntimePaneOptions } from "./types.js";
 
 const CMUX_BIN = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
-function cmux(args: string): string {
-  return execSync(`"${CMUX_BIN}" ${args}`, { encoding: "utf-8" }).trim();
+// Invoke cmux with an argv array and NO shell. Every element (especially crew
+// prompt text passed through send/send-to-surface) reaches cmux as a single
+// literal argument — backticks, $(), quotes are never parsed. See #118.
+function cmux(args: string[]): string {
+  return execFileSync(CMUX_BIN, args, { encoding: "utf-8" }).trim();
 }
 
 function parseList(output: string): WorkspaceRef[] {
@@ -22,17 +25,13 @@ function parseList(output: string): WorkspaceRef[] {
   return refs;
 }
 
-function escape(s: string): string {
-  return s.replace(/"/g, '\\"');
-}
-
 export function createCmuxDriver(): RuntimeDriver {
   return {
     name: "cmux",
 
     async probe(): Promise<RuntimeProbeResult> {
       try {
-        const version = cmux("--version");
+        const version = cmux(["--version"]);
         return { installed: true, version };
       } catch {
         return { installed: false, version: "" };
@@ -41,7 +40,7 @@ export function createCmuxDriver(): RuntimeDriver {
 
     async list(): Promise<WorkspaceRef[]> {
       try {
-        return parseList(cmux("list-workspaces"));
+        return parseList(cmux(["list-workspaces"]));
       } catch {
         return [];
       }
@@ -54,30 +53,31 @@ export function createCmuxDriver(): RuntimeDriver {
     },
 
     async spawn(opts: RuntimeSpawnOptions): Promise<WorkspaceRef> {
-      const cwdFlag = opts.workdir ? ` --cwd "${opts.workdir}"` : "";
-      const output = cmux(`new-workspace --command "${escape(opts.command)}"${cwdFlag}`);
+      const newWorkspaceArgs = ["new-workspace", "--command", opts.command];
+      if (opts.workdir) newWorkspaceArgs.push("--cwd", opts.workdir);
+      const output = cmux(newWorkspaceArgs);
       const id = output.match(/workspace:\d+/)?.[0] || output.split(/\s+/).pop() || "";
       if (!id) {
         throw new Error(`cmux spawn did not return a workspace id: ${output}`);
       }
-      cmux(`rename-workspace --workspace "${id}" "${escape(opts.name)}"`);
+      cmux(["rename-workspace", "--workspace", id, opts.name]);
       // Rename the initial tab to the workspace name so send() can route to it
       let initialSurface: string | undefined;
       try {
-        const tree = cmux(`tree --workspace "${id}"`);
+        const tree = cmux(["tree", "--workspace", id]);
         const m = tree.match(/surface\s+(surface:\d+)\s+\[\w+\]\s+"([^"]*)"/);
         if (m) {
           initialSurface = m[1];
-          cmux(`rename-tab --workspace "${id}" --surface "${m[1]}" "${escape(opts.name)}"`);
+          cmux(["rename-tab", "--workspace", id, "--surface", m[1], opts.name]);
         }
       } catch { /* rename is best-effort */ }
       if (opts.pinToTop) {
         try {
-          cmux(`workspace-action --workspace "${id}" --action pin`);
+          cmux(["workspace-action", "--workspace", id, "--action", "pin"]);
         } catch { /* pin is best-effort */ }
         if (initialSurface) {
           try {
-            cmux(`tab-action --workspace "${id}" --surface "${initialSurface}" --action pin`);
+            cmux(["tab-action", "--workspace", id, "--surface", initialSurface, "--action", "pin"]);
           } catch { /* tab pin is best-effort */ }
         }
       }
@@ -95,23 +95,23 @@ export function createCmuxDriver(): RuntimeDriver {
           const surfaces = await this.listSurfaces(ws.id);
           const target = surfaces.find((s) => s.title === ws.name);
           if (target) {
-            cmux(`send --workspace "${ws.id}" --surface "${target.surfaceId}" "${escape(message)}"`);
-            cmux(`send-key --workspace "${ws.id}" --surface "${target.surfaceId}" Enter`);
+            cmux(["send", "--workspace", ws.id, "--surface", target.surfaceId, message]);
+            cmux(["send-key", "--workspace", ws.id, "--surface", target.surfaceId, "Enter"]);
             return;
           }
         } catch { /* fall through to default */ }
       }
-      cmux(`send --workspace "${ref}" "${escape(message)}"`);
-      cmux(`send-key --workspace "${ref}" Enter`);
+      cmux(["send", "--workspace", ref, message]);
+      cmux(["send-key", "--workspace", ref, "Enter"]);
     },
 
     async sendKey(ref: string, key: string): Promise<void> {
-      cmux(`send-key --workspace "${ref}" ${key}`);
+      cmux(["send-key", "--workspace", ref, key]);
     },
 
     async readScreen(ref: string): Promise<string> {
       try {
-        return cmux(`read-screen --workspace "${ref}"`);
+        return cmux(["read-screen", "--workspace", ref]);
       } catch {
         return "";
       }
@@ -119,15 +119,14 @@ export function createCmuxDriver(): RuntimeDriver {
 
     async stop(ref: string): Promise<void> {
       try {
-        cmux(`close-workspace --workspace "${ref}"`);
+        cmux(["close-workspace", "--workspace", ref]);
       } catch { /* may already be closed */ }
     },
 
     async newPane(opts: RuntimePaneOptions): Promise<PaneRef> {
-      const titleArg = opts.title ? ` --title "${escape(opts.title)}"` : "";
       const cmd = opts.direction === "tab"
-        ? `new-surface --type terminal --workspace "${opts.workspaceId}"`
-        : `new-pane --type terminal --direction ${opts.direction} --workspace "${opts.workspaceId}"`;
+        ? ["new-surface", "--type", "terminal", "--workspace", opts.workspaceId]
+        : ["new-pane", "--type", "terminal", "--direction", opts.direction, "--workspace", opts.workspaceId];
       const output = cmux(cmd);
       const surfaceId = output.match(/surface:\d+/)?.[0];
       if (!surfaceId) {
@@ -136,7 +135,7 @@ export function createCmuxDriver(): RuntimeDriver {
       }
       if (opts.title) {
         try {
-          cmux(`rename-tab --workspace "${opts.workspaceId}" --surface "${surfaceId}"${titleArg}`);
+          cmux(["rename-tab", "--workspace", opts.workspaceId, "--surface", surfaceId, "--title", opts.title]);
         } catch { /* rename is best-effort */ }
       }
       return { workspaceId: opts.workspaceId, surfaceId };
@@ -144,18 +143,18 @@ export function createCmuxDriver(): RuntimeDriver {
 
     async closePane(pane: PaneRef): Promise<void> {
       try {
-        cmux(`close-surface --workspace "${pane.workspaceId}" --surface "${pane.surfaceId}"`);
+        cmux(["close-surface", "--workspace", pane.workspaceId, "--surface", pane.surfaceId]);
       } catch { /* may already be closed */ }
     },
 
     async sendToPane(pane: PaneRef, message: string): Promise<void> {
-      cmux(`send --workspace "${pane.workspaceId}" --surface "${pane.surfaceId}" "${escape(message)}"`);
-      cmux(`send-key --workspace "${pane.workspaceId}" --surface "${pane.surfaceId}" Enter`);
+      cmux(["send", "--workspace", pane.workspaceId, "--surface", pane.surfaceId, message]);
+      cmux(["send-key", "--workspace", pane.workspaceId, "--surface", pane.surfaceId, "Enter"]);
     },
 
     async readPaneScreen(pane: PaneRef): Promise<string> {
       try {
-        return cmux(`read-screen --workspace "${pane.workspaceId}" --surface "${pane.surfaceId}"`);
+        return cmux(["read-screen", "--workspace", pane.workspaceId, "--surface", pane.surfaceId]);
       } catch {
         return "";
       }
@@ -171,11 +170,10 @@ export function createCmuxDriver(): RuntimeDriver {
       // a new tab for "visible" (debug ergonomics). The resize-pane verb is
       // best-effort; if cmux rejects it, the default split size is acceptable.
       const wsId = opts.captainWorkspace.id;
-      const titleArg = opts.title ? ` --title "${escape(opts.title)}"` : "";
       const verb =
         opts.placement === "visible"
-          ? `new-surface --type terminal --workspace "${wsId}"`
-          : `new-pane --type terminal --direction down --workspace "${wsId}"`;
+          ? ["new-surface", "--type", "terminal", "--workspace", wsId]
+          : ["new-pane", "--type", "terminal", "--direction", "down", "--workspace", wsId];
       const output = cmux(verb);
       const surfaceId = output.match(/surface:\d+/)?.[0];
       if (!surfaceId) {
@@ -183,28 +181,28 @@ export function createCmuxDriver(): RuntimeDriver {
       }
       if (opts.title) {
         try {
-          cmux(`rename-tab --workspace "${wsId}" --surface "${surfaceId}"${titleArg}`);
+          cmux(["rename-tab", "--workspace", wsId, "--surface", surfaceId, "--title", opts.title]);
         } catch { /* rename is best-effort */ }
       }
-      cmux(`send --workspace "${wsId}" --surface "${surfaceId}" "${escape(opts.command)}"`);
-      cmux(`send-key --workspace "${wsId}" --surface "${surfaceId}" Enter`);
+      cmux(["send", "--workspace", wsId, "--surface", surfaceId, opts.command]);
+      cmux(["send-key", "--workspace", wsId, "--surface", surfaceId, "Enter"]);
       if (opts.placement === "hidden") {
         try {
-          cmux(`resize-pane --workspace "${wsId}" --surface "${surfaceId}" --rows 1`);
+          cmux(["resize-pane", "--workspace", wsId, "--surface", surfaceId, "--rows", "1"]);
         } catch { /* resize is best-effort; default split size is the fallback */ }
       }
       return { workspaceId: wsId, surfaceId, title: opts.title };
     },
 
     async sendToSurface(surface: PaneRef, text: string): Promise<void> {
-      cmux(`send --workspace "${surface.workspaceId}" --surface "${surface.surfaceId}" "${escape(text)}"`);
-      cmux(`send-key --workspace "${surface.workspaceId}" --surface "${surface.surfaceId}" Enter`);
+      cmux(["send", "--workspace", surface.workspaceId, "--surface", surface.surfaceId, text]);
+      cmux(["send-key", "--workspace", surface.workspaceId, "--surface", surface.surfaceId, "Enter"]);
     },
 
     async listSurfaces(workspaceId: string): Promise<PaneRef[]> {
       let output: string;
       try {
-        output = cmux(`tree --workspace "${workspaceId}"`);
+        output = cmux(["tree", "--workspace", workspaceId]);
       } catch {
         return [];
       }
