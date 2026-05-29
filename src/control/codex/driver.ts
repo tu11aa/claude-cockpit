@@ -53,7 +53,7 @@ export class CodexInteractiveDriver {
         model: rec.model,
         sandbox: "workspace-write",
         approvalPolicy: rec.approvalPolicy ?? "never",
-        ...(rec.roleInstructions ? { developerInstructions: rec.roleInstructions } : {}),
+        developerInstructions: buildCodexDeveloperInstructions(rec),
       });
       this.threadByTask.set(rec.id, threadId);
       this.taskByThread.set(threadId, rec.id);
@@ -149,6 +149,25 @@ export class CodexInteractiveDriver {
       });
     }
   }
+}
+
+/**
+ * Build the per-thread developerInstructions for a codex crew. Unlike
+ * claude/opencode (which get COCKPIT_CREW_* env vars on their shell launch
+ * line), codex tasks share ONE long-lived app-server child, so a process-level
+ * env var would be wrong for concurrent tasks. Instead we tell each thread its
+ * concrete task id + project and the exact flag-based signal command, so the
+ * codex crew can report terminal state via `cockpit crew signal`. Appended
+ * after the crew role body (when present) so the role still leads.
+ */
+export function buildCodexDeveloperInstructions(
+  rec: { id: string; project: string; roleInstructions?: string },
+): string {
+  const directive =
+    `You are cockpit crew task ${rec.id} in project ${rec.project}. ` +
+    `When you finish, run EXACTLY: cockpit crew signal done --task-id ${rec.id} --project ${rec.project} --message "<one-line summary>". ` +
+    `If you are blocked or fail, run cockpit crew signal blocked|failed with the same --task-id ${rec.id} --project ${rec.project} flags.`;
+  return rec.roleInstructions ? `${rec.roleInstructions}\n\n${directive}` : directive;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {

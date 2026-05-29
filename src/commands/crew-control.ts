@@ -109,9 +109,15 @@ export async function cockpitdCall(req: unknown): Promise<unknown> {
 
 /**
  * Build an explicit terminal/blocked event request from a crew's `signal`
- * verb. Reads `COCKPIT_CREW_TASK_ID` and `COCKPIT_CREW_PROJECT` from env so
- * the crew template can run e.g. `cockpit crew signal done --message "…"`
- * without having to know its own task id or project.
+ * verb. Defaults to reading `COCKPIT_CREW_TASK_ID` and `COCKPIT_CREW_PROJECT`
+ * from env so the claude/opencode crew templates can run e.g.
+ * `cockpit crew signal done --message "…"` without knowing their own ids.
+ *
+ * Explicit `taskId`/`project` (from `--task-id`/`--project` flags) take
+ * precedence over env. This is the codex path: a single long-lived app-server
+ * child serves all codex tasks as threads, so a process-level env var is
+ * unsafe (wrong for concurrent tasks). The codex crew is told its concrete ids
+ * via per-thread developerInstructions and signals with the explicit flags.
  *
  * Anti-#2576 invariant lives at the OTHER end (the hook bridge in
  * `_hook`). This builder is the *explicit* path: a crew running this verb
@@ -123,12 +129,16 @@ export function buildSignalRequest(
     message?: string;
     question?: string;
     error?: string;
+    /** Explicit override (codex); falls back to COCKPIT_CREW_TASK_ID env. */
+    taskId?: string;
+    /** Explicit override (codex); falls back to COCKPIT_CREW_PROJECT env. */
+    project?: string;
     /** Injectable for tests; defaults to writing under ~/.config/cockpit/state/_results. */
     writeResult?: (id: string, payload: string) => string;
   },
 ): { kind: "event"; project: string; event: ControlEvent } {
-  const taskId = process.env.COCKPIT_CREW_TASK_ID;
-  const project = process.env.COCKPIT_CREW_PROJECT;
+  const taskId = o.taskId ?? process.env.COCKPIT_CREW_TASK_ID;
+  const project = o.project ?? process.env.COCKPIT_CREW_PROJECT;
   if (!taskId)
     throw new Error("not running under a crew (COCKPIT_CREW_TASK_ID unset)");
   if (!project)
@@ -253,11 +263,13 @@ export function addControlPlaneCrewCommands(crew: Command): void {
   // (git status clean, etc.) to declare terminal state to the captain.
   crew
     .command("signal <state>")
-    .description("Emit explicit terminal signal from a crew session: done|blocked|failed (reads COCKPIT_CREW_* env)")
+    .description("Emit explicit terminal signal from a crew session: done|blocked|failed (reads COCKPIT_CREW_* env, or --task-id/--project for codex)")
     .option("--message <m>", "Summary written to resultRef (done)")
     .option("--question <q>", "Question to surface to captain (blocked)")
     .option("--error <e>", "Error message (failed)")
-    .action(async (state: string, opts: { message?: string; question?: string; error?: string }) => {
+    .option("--task-id <id>", "Explicit task id (codex; overrides COCKPIT_CREW_TASK_ID env)")
+    .option("--project <p>", "Explicit project (codex; overrides COCKPIT_CREW_PROJECT env)")
+    .action(async (state: string, opts: { message?: string; question?: string; error?: string; taskId?: string; project?: string }) => {
       if (state !== "done" && state !== "blocked" && state !== "failed") {
         process.stderr.write(`unknown signal '${state}' (expected: done|blocked|failed)\n`);
         process.exit(2);
@@ -267,6 +279,8 @@ export function addControlPlaneCrewCommands(crew: Command): void {
           ...(opts.message !== undefined ? { message: opts.message } : {}),
           ...(opts.question !== undefined ? { question: opts.question } : {}),
           ...(opts.error !== undefined ? { error: opts.error } : {}),
+          ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
+          ...(opts.project !== undefined ? { project: opts.project } : {}),
           writeResult: defaultWriteResult,
         });
         await cockpitdCall(req);

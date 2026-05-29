@@ -41,6 +41,26 @@ describe("CodexInteractiveDriver.dispatch", () => {
     ]);
   });
 
+  it("injects task id, project, and the explicit-flag signal command into developerInstructions", async () => {
+    const client = fakeClient();
+    const drv = new CodexInteractiveDriver({
+      makeClient: () => client,
+      emit: () => {},
+    });
+    await drv.dispatch({
+      id: "task-42", project: "demo", provider: "codex", mode: "interactive",
+      state: "submitted", task: "x", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "", heartbeatBudgetMs: 1000,
+      attempts: [{ attemptId: "a1", startedAt: 1, lastHeartbeatAt: 1 }],
+      cwd: "/tmp/work", roleInstructions: "ROLE BODY",
+    } as any);
+    const dev = client.startThread.mock.calls[0][0].developerInstructions as string;
+    expect(dev).toContain("ROLE BODY");
+    expect(dev).toContain("task-42");
+    expect(dev).toContain("demo");
+    expect(dev).toContain("cockpit crew signal done --task-id task-42 --project demo");
+  });
+
   it("routes serverRequest with no threadId to the sole active task", async () => {
     const client = fakeClient();
     const events: any[] = [];
