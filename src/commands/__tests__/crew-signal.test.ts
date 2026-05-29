@@ -76,4 +76,28 @@ describe("buildSignalRequest", () => {
     delete process.env.COCKPIT_CREW_PROJECT;
     expect(() => buildSignalRequest("done", {})).toThrow(/COCKPIT_CREW_PROJECT/);
   });
+
+  // The codex case: a long-lived shared app-server serves all codex tasks as
+  // threads, so a process-level env var is unsafe. Explicit flags let a codex
+  // crew signal its own task with NO env vars set.
+  it("explicit taskId+project flags build a targeted request with NO env set (codex case)", () => {
+    delete process.env.COCKPIT_CREW_TASK_ID;
+    delete process.env.COCKPIT_CREW_PROJECT;
+    const req = buildSignalRequest("done", { taskId: "X", project: "P", message: "m" });
+    expect(req.project).toBe("P");
+    expect(req.event).toMatchObject({ type: "task.done", id: "X", message: "m" });
+  });
+
+  // Regression guard: claude/opencode keep using env when no flags are given.
+  it("no flags + env set → unchanged env-based behavior (claude/opencode guard)", () => {
+    const req = buildSignalRequest("done", { message: "m" });
+    expect(req.project).toBe("alpha");
+    expect(req.event).toMatchObject({ type: "task.done", id: "task-xyz" });
+  });
+
+  it("flags take precedence over env when both present", () => {
+    const req = buildSignalRequest("done", { taskId: "flag-id", project: "flag-proj" });
+    expect(req.project).toBe("flag-proj");
+    expect((req.event as { id: string }).id).toBe("flag-id");
+  });
 });
