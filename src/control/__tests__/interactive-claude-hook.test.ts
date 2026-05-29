@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapClaudeHookToEvent, detectTrailingQuestion, deriveTranscriptPath } from "../interactive/claude.js";
+import { mapClaudeHookToEvent, detectTrailingQuestion, deriveTranscriptPath, isPermissionNotification } from "../interactive/claude.js";
 
 describe("mapClaudeHookToEvent", () => {
   const TID = "task-abc";
@@ -39,6 +39,11 @@ describe("mapClaudeHookToEvent", () => {
   it("anti-#2576 invariant: NO input produces task.done or task.failed", () => {
     // Walk the entire known Claude hook event surface plus the bare-name aliases
     // a careless implementation might emit.
+    // NARROW EXCEPTIONS to task.blocked (never task.done/task.failed):
+    //   #174: Stop + trailing question → task.blocked
+    //   #notification-hook: Notification + permission message → task.blocked
+    // This sweep uses {} payloads (no message/question) so neither exception fires —
+    // Notification with {} has no message → task.progress, not task.blocked.
     const ALL_KNOWN = [
       "Stop",
       "SubagentStop",
@@ -235,6 +240,90 @@ describe("mapClaudeHookToEvent Stop derived-path fallback (#174 delivery)", () =
   it("session_id+cwd present but no transcript file on disk → task.turn.completed, never throws", () => {
     const ev = mapClaudeHookToEvent("Stop", { session_id: "missing", cwd: "/Users/q3labsadmin/me/claude-cockpit" }, TID);
     expect(ev).toEqual({ type: "task.turn.completed", id: TID, turnId: "hook-stop" });
+  });
+});
+
+describe("isPermissionNotification", () => {
+  it("returns true when message contains 'permission'", () => {
+    expect(isPermissionNotification("Claude needs your permission to use Bash")).toBe(true);
+    expect(isPermissionNotification("This operation requires permission")).toBe(true);
+    expect(isPermissionNotification("permission to write file")).toBe(true);
+  });
+
+  it("returns true when message contains 'approve'", () => {
+    expect(isPermissionNotification("Please approve this action")).toBe(true);
+    expect(isPermissionNotification("Approve the tool use to continue")).toBe(true);
+  });
+
+  it("returns false for idle/liveness notifications (not permission requests)", () => {
+    expect(isPermissionNotification("Waiting for your input")).toBe(false);
+    expect(isPermissionNotification("Claude is thinking...")).toBe(false);
+    expect(isPermissionNotification("I've finished the task and pushed the branch.")).toBe(false);
+  });
+
+  it("returns false for empty or whitespace string", () => {
+    expect(isPermissionNotification("")).toBe(false);
+    expect(isPermissionNotification("   ")).toBe(false);
+  });
+
+  it("is case-insensitive", () => {
+    expect(isPermissionNotification("Claude Needs Your PERMISSION to run")).toBe(true);
+    expect(isPermissionNotification("APPROVE this command")).toBe(true);
+  });
+});
+
+describe("mapClaudeHookToEvent Notification (instant permission detection, #notification-hook)", () => {
+  const TID = "task-abc";
+
+  it("permission message → task.blocked with reason='crew awaiting permission (notification hook)' and question=message", () => {
+    const msg = "Claude needs your permission to use Bash";
+    const ev = mapClaudeHookToEvent("Notification", { message: msg }, TID);
+    expect(ev).toEqual({
+      type: "task.blocked",
+      id: TID,
+      reason: "crew awaiting permission (notification hook)",
+      question: msg,
+    });
+  });
+
+  it("idle/non-permission message → task.progress with note 'notification'", () => {
+    expect(mapClaudeHookToEvent("Notification", { message: "Waiting for your input" }, TID))
+      .toEqual({ type: "task.progress", id: TID, note: "notification" });
+  });
+
+  it("missing message field → task.progress, never throws", () => {
+    expect(mapClaudeHookToEvent("Notification", {}, TID))
+      .toEqual({ type: "task.progress", id: TID, note: "notification" });
+  });
+
+  it("null payload → task.progress, never throws", () => {
+    expect(mapClaudeHookToEvent("Notification", null, TID))
+      .toEqual({ type: "task.progress", id: TID, note: "notification" });
+  });
+
+  it("undefined payload → task.progress, never throws", () => {
+    expect(mapClaudeHookToEvent("Notification", undefined, TID))
+      .toEqual({ type: "task.progress", id: TID, note: "notification" });
+  });
+
+  it("non-string message (e.g. a number) → task.progress, never throws", () => {
+    expect(mapClaudeHookToEvent("Notification", { message: 42 }, TID))
+      .toEqual({ type: "task.progress", id: TID, note: "notification" });
+  });
+
+  it("empty message string → task.progress (not a permission request)", () => {
+    expect(mapClaudeHookToEvent("Notification", { message: "" }, TID))
+      .toEqual({ type: "task.progress", id: TID, note: "notification" });
+  });
+
+  it("NEVER emits task.done or task.failed regardless of message", () => {
+    for (const msg of ["needs your permission", "please approve", "approve this", ""]) {
+      const ev = mapClaudeHookToEvent("Notification", { message: msg }, TID);
+      if (ev) {
+        expect(ev.type).not.toBe("task.done");
+        expect(ev.type).not.toBe("task.failed");
+      }
+    }
   });
 });
 

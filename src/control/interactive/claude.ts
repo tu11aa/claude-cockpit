@@ -13,7 +13,7 @@ import type { ControlEvent } from "../types.js";
 // SubagentStop/SessionEnd fire only at turn boundaries but are liveness-only:
 // SubagentStop fires while the parent agent still owns the turn, and SessionEnd
 // is an unreliable signal (crash / Ctrl-C / /exit).
-const EVENTS = ["Stop", "SubagentStop", "SessionEnd", "PostToolUse"] as const;
+const EVENTS = ["Stop", "SubagentStop", "SessionEnd", "PostToolUse", "Notification"] as const;
 
 /**
  * Probe whether the local Claude CLI supports `--settings <path>`. The
@@ -30,6 +30,18 @@ export function probeClaudeSettingsFlag(): "flag" | "project-dir" {
   } catch {
     return "project-dir";
   }
+}
+
+/**
+ * Pure: returns true when a Notification hook message indicates Claude is waiting
+ * for the user to grant a tool-use permission. Idle notifications ("Waiting for
+ * your input", "Claude is thinking") return false — only permission/approval
+ * language triggers the fast-path task.blocked path.
+ */
+export function isPermissionNotification(message: string): boolean {
+  if (!message || !message.trim()) return false;
+  const lower = message.toLowerCase();
+  return lower.includes("permission") || lower.includes("approve");
 }
 
 /** Pure, idempotent merge of cockpit hooks into a Claude settings object. */
@@ -155,16 +167,21 @@ function resolveLastAssistantText(payload: unknown): string | null {
  *
  * Stop = turn boundary. It normally maps to task.turn.completed → awaiting-input
  * (stall-immune) so a captain reviewing output never trips a false CREW STALLED
- * (fixes #131). NARROW EXCEPTION (#174): when the crew's last assistant message
+ * (fixes #131). NARROW EXCEPTION #1 (#174): when the crew's last assistant message
  * ENDS with a direct question, Stop maps to task.blocked instead, surfacing the
- * question to the captain as CREW BLOCKED. This is the one auto-detected path to
- * `task.blocked`; it relaxes the old "no hook → blocked" rule for blocked ONLY
- * (never done/failed). The last-assistant text is obtained from a LAYERED source
- * (last_assistant_message on the payload → transcript_path → derived path from
- * session_id+cwd); the payload field is the primary, I/O-free source and the
- * earlier transcript_path-only approach is why #174 stayed dormant in production.
- * All transcript I/O is best-effort: any failure falls through to the next source
- * and ultimately to task.turn.completed, and never throws (the hook must exit 0).
+ * question to the captain as CREW BLOCKED. The last-assistant text is obtained from
+ * a LAYERED source (last_assistant_message on the payload → transcript_path →
+ * derived path from session_id+cwd); the payload field is the primary, I/O-free
+ * source. All transcript I/O is best-effort and never throws (hook must exit 0).
+ *
+ * Notification = Claude needs user attention. NARROW EXCEPTION #2
+ * (#notification-hook): when the payload.message indicates a permission request
+ * (isPermissionNotification), this maps to task.blocked instantly — bypassing the
+ * ~20-30s relay poll. The relay poll remains as a fallback for opencode crews and
+ * as a safety net; both may fire task.blocked for the same prompt, but the
+ * state-machine idempotency (already-blocked → no-op, from #176) deduplicates.
+ * Non-permission notifications (idle liveness) → task.progress. Missing/non-string
+ * message → task.progress (never throws, hook must exit 0).
  */
 export function mapClaudeHookToEvent(
   event: string,
@@ -179,6 +196,13 @@ export function mapClaudeHookToEvent(
         return { type: "task.blocked", id: taskId, reason: "crew asked a question (auto-detected)", question };
       }
       return { type: "task.turn.completed", id: taskId, turnId: "hook-stop" };
+    }
+    case "Notification": {
+      const msg = (payload as any)?.message;
+      if (typeof msg === "string" && isPermissionNotification(msg)) {
+        return { type: "task.blocked", id: taskId, reason: "crew awaiting permission (notification hook)", question: msg };
+      }
+      return { type: "task.progress", id: taskId, note: "notification" };
     }
     case "SubagentStop":
     case "SessionEnd":
