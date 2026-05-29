@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-29
+
+### Added
+
+- **Control-plane daemon (cockpitd).** A new background daemon provides an
+  AF_UNIX socket server with newline-JSON framing, a task state machine, atomic
+  per-task JSON state store, heartbeat watchdog with stall detection and
+  automatic recovery, startup crash-reconciliation, and self-healing daemon
+  management on every `cockpit` invocation. A launchd plist target is included
+  for macOS service integration. (PR #85 and the full control-plane series)
+- **Codex interactive crews.** An `AppServerClient` speaking the codex app-server
+  v2 protocol (mandatory handshake, thread start/resume/read, id-correlated
+  requests, notification fanout), a `CodexInteractiveDriver` owning the
+  app-server child process, an approval/gate primitive, a `cockpit crew attach`
+  cmux-tab renderer, and `cockpit crew chat --provider codex` / `--approval` /
+  `reply --gate` verbs. (#86 interactive slice, #96–#104)
+- **Claude interactive crews routed through the daemon.** Claude crew sessions
+  now flow through cockpitd rather than bypassing it, unifying the session
+  lifecycle under the daemon's state machine. (#108, #64 slice)
+- **opencode interactive crews wired through the daemon.** opencode crews gain
+  a dedicated crew template, per-crew permission configuration, and
+  `autoApprove`/model passthrough, all served through the daemon. (#127, #128,
+  #129)
+- **Daemon push-notifications to the captain.** Terminal task events are
+  delivered to the captain via an in-cmux relay, keeping the captain informed
+  without polling. (#109, #110, #111, #112)
+- **Mailbox + injector foundational refactor.** A new mailbox abstraction and
+  injector layer underpin the daemon's communication channels. (#113, #116)
+- **Dashboard status grid now reads live daemon task state.** The dashboard no
+  longer depends on `status.md` — it queries the daemon directly for current
+  task state. (#154)
+- **Self-contained architecture HTML report**, with a Vietnamese translation.
+  (#147, #149)
+- **Process-cleanup rule** added to crew templates and the `captain-ops` skill
+  to ensure child processes are cleaned up on session exit. (#164)
+- **Release automation.** A GitHub Actions workflow tags `vX.Y.Z` from
+  `package.json`, publishes a GitHub Release with notes from the `CHANGELOG`
+  section, and (when an `NPM_TOKEN` secret is set) publishes to npm — on every
+  push to `main`. (#170)
+
+### Changed
+
+- **Crew sessions use an identity-first generic template** with a no-nested-subagents
+  rule, replacing agent-specific templates. (#105, #106)
+- **Source-managed directories self-heal on every cockpit invocation.** Missing
+  directories under source control are re-created automatically. (#74)
+- **Plugin manifest registers the cockpit skill namespace.** Dead
+  `plugin/package.json` removed. (#72, #73)
+
+### Fixed
+
+- **Multi-line crew prompts no longer fragment.** Newlines are collapsed before
+  the cmux send, preventing truncated prompts. (#136, #166)
+- **First-turn crew dispatch no longer drops on slow CLI boot.** Fixed delays
+  have been replaced with pane-readiness polling for reliable first-turn
+  delivery. (#165, #167)
+- **False `CREW STALLED` alerts eliminated.** The `Stop` map now correctly
+  resolves to `awaiting-input`, and the heartbeat refreshes mid-turn via a
+  `PostToolUse` hook. (#124, #131, #133)
+- **cmux shell-injection closed** in `sendToPane`/`sendToSurface` and the notify
+  path. (#119, #122)
+- **notify-relay now runs as a hidden background tab** rather than a split pane,
+  preventing accidental interference. (#117, #123, #161, #162)
+- **Daemon-bounce loop fixed** by separating `PATH` drift detection from
+  program-arg changes. (#126)
+- **cmux stderr no longer leaks into the captain terminal.** (#121, #125)
+- **Fresh-install gaps closed:** cmux binary path resolution cascade (issues #1,
+  #144), launchd plist `PATH` baking (issues #5, #143), and a reconciled
+  Node >=18 floor across README, `cockpit doctor`, and `package.json` (#142).
+- **Cockpit hooks delivered via `.claude/settings.local.json`** instead of
+  `--settings`, aligning with Claude Code's recommended hook mechanism. (#134,
+  #137)
+- **codex `approvalPolicy` defaults to `'never'`** for unattended crews. (#132)
+- **`task.reopened` semantic fixed.** Re-tasking a done crew now fires
+  `CREW DONE` again as expected. (#148, #150)
+- **vitest scoped to `src/**/*.test.ts`** to avoid picking up non-source test
+  files. (#157, #158)
+- **Captain tab renamed and pinned** so crew reports route to the correct
+  surface. (#83, #84)
+- **Projection reads the canonical project source** outside the `cwd` sandbox.
+  (#63)
+- **Control-plane red-team hardening:** path-traversal sanitization, fail-loud
+  interactive dispatch, and `PATH` baked into the launchd plist.
+- **Captain is notified when a crew goes idle.** An idle interactive crew now
+  transitions to `awaiting-input` and fires a single accurate `CREW IDLE` notice
+  instead of a misleading `CREW STALLED`; the explicit `signal done` path still
+  fires `CREW DONE`. (#172)
+- **codex crews can report terminal state.** `cockpit crew signal` accepts
+  `--task-id`/`--project` flags, and codex threads receive their concrete task
+  id + project via `developerInstructions`, so codex crews can signal
+  done/blocked/failed like claude/opencode. (#173)
+
 ### Removed
 
 - **Reactor engine.** The always-on GitHub poller / auto-delegation engine has
