@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapClaudeHookToEvent, detectTrailingQuestion } from "../interactive/claude.js";
+import { mapClaudeHookToEvent, detectTrailingQuestion, deriveTranscriptPath } from "../interactive/claude.js";
 
 describe("mapClaudeHookToEvent", () => {
   const TID = "task-abc";
@@ -139,5 +139,101 @@ describe("mapClaudeHookToEvent Stop transcript path (#174)", () => {
     writeFileSync(bad, "{not json\n{also not json");
     expect(mapClaudeHookToEvent("Stop", { transcript_path: bad }, TID))
       .toEqual({ type: "task.turn.completed", id: TID, turnId: "hook-stop" });
+  });
+});
+
+describe("deriveTranscriptPath (#174 delivery)", () => {
+  const SAVED_HOME = process.env.HOME;
+  afterEach(() => { process.env.HOME = SAVED_HOME; });
+
+  it("builds ~/.claude/projects/<escaped-cwd>/<session>.jsonl for a normal cwd", () => {
+    process.env.HOME = "/home/tester";
+    expect(deriveTranscriptPath("sess-123", "/Users/q3labsadmin/me/claude-cockpit"))
+      .toBe("/home/tester/.claude/projects/-Users-q3labsadmin-me-claude-cockpit/sess-123.jsonl");
+  });
+
+  it("matches the real Claude escaping convention (dots and slashes both → '-')", () => {
+    // Verified against the live dir name under ~/.claude/projects:
+    // /Users/q3labsadmin/.claude-mem/observer-sessions
+    //   -> -Users-q3labsadmin--claude-mem-observer-sessions  (the '/.' becomes '--')
+    process.env.HOME = "/home/tester";
+    expect(deriveTranscriptPath("s", "/Users/q3labsadmin/.claude-mem/observer-sessions"))
+      .toBe("/home/tester/.claude/projects/-Users-q3labsadmin--claude-mem-observer-sessions/s.jsonl");
+  });
+
+  it("returns null when sessionId is missing", () => {
+    expect(deriveTranscriptPath("", "/Users/x")).toBeNull();
+    expect(deriveTranscriptPath(undefined as unknown as string, "/Users/x")).toBeNull();
+  });
+
+  it("returns null when cwd is missing", () => {
+    expect(deriveTranscriptPath("sess", "")).toBeNull();
+    expect(deriveTranscriptPath("sess", undefined as unknown as string)).toBeNull();
+  });
+});
+
+describe("mapClaudeHookToEvent Stop derived-path fallback (#174 delivery)", () => {
+  const TID = "task-abc";
+  const SAVED_HOME = process.env.HOME;
+  let home: string;
+
+  const assistant = (text: string) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
+  const user = (text: string) => ({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
+
+  // Lay down a fake ~/.claude/projects/<escaped-cwd>/<session>.jsonl under a tmp HOME
+  // so the derived-path branch reads a real file without touching the real home.
+  function writeDerivedTranscript(cwd: string, sessionId: string, entries: unknown[]): void {
+    const escaped = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    const projDir = join(home, ".claude", "projects", escaped);
+    mkdirSync(projDir, { recursive: true });
+    writeFileSync(join(projDir, `${sessionId}.jsonl`), entries.map((e) => JSON.stringify(e)).join("\n"));
+  }
+
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), "cp-home-")); process.env.HOME = home; });
+  afterEach(() => { process.env.HOME = SAVED_HOME; rmSync(home, { recursive: true, force: true }); });
+
+  it("no transcript_path but session_id+cwd resolve to a transcript ending in a question → task.blocked", () => {
+    const cwd = "/Users/q3labsadmin/me/claude-cockpit";
+    writeDerivedTranscript(cwd, "sess-q", [user("go"), assistant("Which config file should I edit?")]);
+    const ev = mapClaudeHookToEvent("Stop", { session_id: "sess-q", cwd }, TID);
+    expect(ev).toEqual({
+      type: "task.blocked",
+      id: TID,
+      reason: "crew asked a question (auto-detected)",
+      question: "Which config file should I edit?",
+    });
+  });
+
+  it("no transcript_path, derived transcript ends in a statement → task.turn.completed", () => {
+    const cwd = "/Users/q3labsadmin/me/claude-cockpit";
+    writeDerivedTranscript(cwd, "sess-s", [user("go"), assistant("Done. Pushed the branch.")]);
+    const ev = mapClaudeHookToEvent("Stop", { session_id: "sess-s", cwd }, TID);
+    expect(ev).toEqual({ type: "task.turn.completed", id: TID, turnId: "hook-stop" });
+  });
+
+  it("transcript_path present but unreadable → falls through to derived path (question) → task.blocked", () => {
+    const cwd = "/Users/q3labsadmin/me/claude-cockpit";
+    writeDerivedTranscript(cwd, "sess-fb", [user("go"), assistant("Should I delete the old branch?")]);
+    const ev = mapClaudeHookToEvent(
+      "Stop",
+      { transcript_path: join(home, "does-not-exist.jsonl"), session_id: "sess-fb", cwd },
+      TID,
+    );
+    expect(ev).toEqual({
+      type: "task.blocked",
+      id: TID,
+      reason: "crew asked a question (auto-detected)",
+      question: "Should I delete the old branch?",
+    });
+  });
+
+  it("neither transcript_path nor session_id → task.turn.completed, never throws", () => {
+    const ev = mapClaudeHookToEvent("Stop", { cwd: "/Users/q3labsadmin/me/claude-cockpit" }, TID);
+    expect(ev).toEqual({ type: "task.turn.completed", id: TID, turnId: "hook-stop" });
+  });
+
+  it("session_id+cwd present but no transcript file on disk → task.turn.completed, never throws", () => {
+    const ev = mapClaudeHookToEvent("Stop", { session_id: "missing", cwd: "/Users/q3labsadmin/me/claude-cockpit" }, TID);
+    expect(ev).toEqual({ type: "task.turn.completed", id: TID, turnId: "hook-stop" });
   });
 });

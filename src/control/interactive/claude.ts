@@ -1,5 +1,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { InteractiveHookAdapter } from "./types.js";
 import type { ControlEvent } from "../types.js";
 
@@ -68,6 +70,20 @@ export function detectTrailingQuestion(text: string): string | null {
 }
 
 /**
+ * Pure: derive the Claude transcript JSONL path for a session. Claude stores
+ * transcripts at ~/.claude/projects/<escaped-cwd>/<session_id>.jsonl, where the
+ * cwd is escaped by replacing every non-alphanumeric char with "-" (verified
+ * against the live ~/.claude/projects layout — e.g. /Users/q3labsadmin/.claude-mem
+ * -> -Users-q3labsadmin--claude-mem). Returns null if sessionId or cwd is missing.
+ * This is the layered fallback for #174 when the Stop payload omits transcript_path.
+ */
+export function deriveTranscriptPath(sessionId: string, cwd: string): string | null {
+  if (!sessionId || !cwd) return null;
+  const escaped = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  return join(homedir(), ".claude", "projects", escaped, `${sessionId}.jsonl`);
+}
+
+/**
  * I/O: read the LAST assistant message text from a Claude transcript JSONL file.
  * Kept separate from the pure detector so the detector stays trivially testable.
  * Never throws — returns null on any read/parse failure (the hook must exit 0).
@@ -102,6 +118,29 @@ function readLastAssistantText(transcriptPath: string): string | null {
 }
 
 /**
+ * I/O: obtain the last-assistant text from a LAYERED source, first readable wins:
+ *   1. payload.transcript_path (the documented field, when present + readable);
+ *   2. else the path derived from payload.session_id + cwd (real Stop payloads
+ *      frequently omit transcript_path — this is the #174 delivery fix).
+ * cwd preference: payload.cwd (Claude hook contract) → COCKPIT_CREW_CWD → cwd().
+ * Best-effort: a null from one source falls through to the next; never throws.
+ */
+function resolveLastAssistantText(payload: unknown): string | null {
+  const p = payload as any;
+  const candidates: string[] = [];
+  const tp = p?.transcript_path;
+  if (typeof tp === "string" && tp) candidates.push(tp);
+  const cwd = (typeof p?.cwd === "string" && p.cwd) ? p.cwd : (process.env.COCKPIT_CREW_CWD || process.cwd());
+  const derived = deriveTranscriptPath(p?.session_id, cwd);
+  if (derived) candidates.push(derived);
+  for (const path of candidates) {
+    const text = readLastAssistantText(path);
+    if (text != null) return text;
+  }
+  return null;
+}
+
+/**
  * Map a Claude hook event name to a cockpit ControlEvent. Codifies the anti-#2576
  * invariant: NO Claude hook ever maps to `task.done`/`task.failed`.
  * PostToolUse/SubagentStop/SessionEnd = liveness only (task.progress).
@@ -109,12 +148,14 @@ function readLastAssistantText(transcriptPath: string): string | null {
  *
  * Stop = turn boundary. It normally maps to task.turn.completed → awaiting-input
  * (stall-immune) so a captain reviewing output never trips a false CREW STALLED
- * (fixes #131). NARROW EXCEPTION (#174): when the Stop payload carries a
- * `transcript_path` and the crew's last assistant message ENDS with a direct
- * question, Stop maps to task.blocked instead, surfacing the question to the
- * captain as CREW BLOCKED. This is the one auto-detected path to `task.blocked`;
- * it relaxes the old "no hook → blocked" rule for blocked ONLY (never done/failed).
- * All transcript I/O is best-effort: any failure falls back to task.turn.completed
+ * (fixes #131). NARROW EXCEPTION (#174): when the crew's last assistant message
+ * ENDS with a direct question, Stop maps to task.blocked instead, surfacing the
+ * question to the captain as CREW BLOCKED. This is the one auto-detected path to
+ * `task.blocked`; it relaxes the old "no hook → blocked" rule for blocked ONLY
+ * (never done/failed). The last-assistant text is obtained from a LAYERED source
+ * (transcript_path → derived path from session_id+cwd) because real Stop payloads
+ * do not reliably carry transcript_path. All transcript I/O is best-effort: any
+ * failure falls through to the next source and ultimately to task.turn.completed,
  * and never throws (the hook must exit 0).
  */
 export function mapClaudeHookToEvent(
@@ -124,13 +165,10 @@ export function mapClaudeHookToEvent(
 ): ControlEvent | null {
   switch (event) {
     case "Stop": {
-      const transcriptPath = (payload as any)?.transcript_path;
-      if (typeof transcriptPath === "string" && transcriptPath) {
-        const text = readLastAssistantText(transcriptPath);
-        const question = text ? detectTrailingQuestion(text) : null;
-        if (question) {
-          return { type: "task.blocked", id: taskId, reason: "crew asked a question (auto-detected)", question };
-        }
+      const text = resolveLastAssistantText(payload);
+      const question = text ? detectTrailingQuestion(text) : null;
+      if (question) {
+        return { type: "task.blocked", id: taskId, reason: "crew asked a question (auto-detected)", question };
       }
       return { type: "task.turn.completed", id: taskId, turnId: "hook-stop" };
     }
