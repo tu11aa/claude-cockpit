@@ -61,6 +61,10 @@ export interface TaskRecord {
   attempts: DispatchAttempt[];
   /** Interactive-codex HITL slice (spec §4.9). */
   gates?: Gate[];
+  /** Set by the sweep after firing the debounced CREW IDLE notification (#185).
+   *  Cleared on every transition back to `working` so each new idle period
+   *  can re-notify once. */
+  idleNotified?: boolean;
   /** Codex AskForApproval policy forwarded to startThread (interactive only).
    *  When set to "untrusted", codex requests approval for tool/shell calls,
    *  exercising the gate-promotion flow end-to-end. */

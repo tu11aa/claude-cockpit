@@ -43,6 +43,7 @@ export function reduce(rec: TaskRecord, ev: ControlEvent, now: number): TaskReco
         pid: ev.pid ?? rec.pid,
         sessionId: ev.sessionId ?? rec.sessionId,
         question: undefined, // resuming after a blocked→reply clears the question
+        idleNotified: undefined,
       };
     case "task.progress":
     case "heartbeat":
@@ -56,7 +57,7 @@ export function reduce(rec: TaskRecord, ev: ControlEvent, now: number): TaskReco
       // puts the task into awaiting-input between turns (fixes #131 false
       // stall); PostToolUse on the next turn resumes the working state.
       if (rec.state === "blocked") return { ...rec, lastHeartbeat: now, lastEvent: ev.type };
-      if (rec.state === "awaiting-input") return { ...base, state: "working" };
+      if (rec.state === "awaiting-input") return { ...base, state: "working", idleNotified: undefined };
       return base;
     case "task.blocked":
       // ev.reason is protocol/logging-only and intentionally not persisted;
@@ -77,7 +78,7 @@ export function reduce(rec: TaskRecord, ev: ControlEvent, now: number): TaskReco
     case "task.session":
       return stampAttempt(base, { resumeRef: ev.resumeRef }, now);
     case "task.turn.started":
-      return { ...stampAttempt(base, {}, now), state: "working" };
+      return { ...stampAttempt(base, {}, now), state: "working", idleNotified: undefined };
     case "task.turn.completed":
       // Anti-#2576 invariant: TurnCompleted is liveness, NEVER completion. Spec §4.8.
       return { ...stampAttempt(base, {}, now), state: "awaiting-input" };

@@ -38,9 +38,14 @@ export interface DaemonDeps {
   }) => Promise<void> | void;
 }
 
-// 'awaiting-input' is an attention state: entering it (idle watchdog OR a
-// Stop-hook turn boundary) fires exactly one accurate CREW IDLE push. The
-// firePush prev===next guard keeps it from re-firing while the task sits idle.
+// 2-minute debounce before the sweep fires CREW IDLE for a crew sitting in
+// awaiting-input after a normal turn-end. Turn-end itself is silent (#185).
+const IDLE_NOTIFY_MS = 120_000;
+
+// 'awaiting-input' stays in ATTENTION_STATES so the watchdog idle path
+// (evaluateStall) can still fire CREW IDLE immediately for over-budget tasks.
+// Normal turn-end notifications are suppressed in firePush and replaced by
+// the sweep idle-notify pass after IDLE_NOTIFY_MS.
 const ATTENTION_STATES: ReadonlySet<TaskState> = new Set(["done", "blocked", "failed", "stalled", "awaiting-input"]);
 
 function shortId(id: string): string {
@@ -81,6 +86,9 @@ function firePush(
   if (!deps.notify) return;
   if (prev === next.state) return;
   if (!ATTENTION_STATES.has(next.state)) return;
+  // Turn-end is silent: the sweep idle-notify pass fires CREW IDLE once after
+  // IDLE_NOTIFY_MS. Without this, every turn fires an immediate notification.
+  if (next.state === "awaiting-input" && event.type === "task.turn.completed") return;
   const message = formatMessage(next);
   if (!message) return;
   // Fire-and-forget; swallow errors so the daemon never trips on a flaky
@@ -187,7 +195,6 @@ export function createDaemon(deps: DaemonDeps) {
       for (const r of store.listAll()) {
         const idle = evaluateStall(r, t);
         if (idle) {
-          store.put(idle);
           // Interactive idle → awaiting-input (task.idle); headless → stalled
           // (task.stalled). The synth event only carries the notify payload;
           // the reducer treats both as no-ops (state already updated above).
@@ -195,12 +202,39 @@ export function createDaemon(deps: DaemonDeps) {
             idle.state === "awaiting-input"
               ? { type: "task.idle", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs }
               : { type: "task.stalled", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs };
-          firePush(deps, r.project, r.state, idle, synthEvent);
+          // For watchdog-driven awaiting-input, mark idleNotified immediately
+          // so the idle-notify pass below doesn't double-fire CREW IDLE.
+          const stored = idle.state === "awaiting-input" ? { ...idle, idleNotified: true } : idle;
+          store.put(stored);
+          firePush(deps, r.project, r.state, stored, synthEvent);
           continue;
         }
         const recovered = recoverStall(r, t);
         // recoverStall does NOT check heartbeat freshness — guard per its contract
         if (recovered && t - r.lastHeartbeat <= r.heartbeatBudgetMs) store.put(recovered);
+      }
+
+      // Idle-notify pass: fire CREW IDLE once for tasks that arrived in
+      // awaiting-input via a normal turn-end (silent) and have now sat idle
+      // past the debounce window without a notification.
+      if (deps.notify) {
+        for (const r of store.listAll()) {
+          if (r.state !== "awaiting-input") continue;
+          if (r.idleNotified) continue;
+          if (t - r.lastHeartbeat <= IDLE_NOTIFY_MS) continue;
+          const message = formatMessage(r);
+          if (!message) continue;
+          const synthEvent: ControlEvent = { type: "task.idle", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs };
+          store.put({ ...r, idleNotified: true });
+          try {
+            const p = deps.notify({ project: r.project, message, record: r, event: synthEvent });
+            if (p && typeof (p as Promise<void>).catch === "function") {
+              (p as Promise<void>).catch(() => {});
+            }
+          } catch {
+            // intentionally swallowed
+          }
+        }
       }
     },
     reconcile(): void {
