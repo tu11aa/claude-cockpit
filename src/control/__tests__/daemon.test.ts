@@ -300,3 +300,56 @@ describe("daemon – blocked crew resume path (#183)", () => {
     expect(calls[0].message).toContain("CREW BLOCKED");
   });
 });
+
+// ── Issue #185b: boot-storm — reconcile must silence pre-existing idle tasks ──
+describe("daemon – boot-guard for pre-existing idle tasks (#185b)", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "cp-d-bootguard-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // now=200_000ms ensures t - lastHeartbeat(0) = 200_000 > IDLE_NOTIFY_MS(120_000)
+  // so any unguarded awaiting-input task would fire in the sweep idle-notify pass.
+
+  it("reconcile marks a pre-existing awaiting-input task idleNotified=true", () => {
+    const store = createStore(dir);
+    store.put(rec("old-idle", { state: "awaiting-input", lastHeartbeat: 0, heartbeatBudgetMs: 100 }));
+    const d = createDaemon({ store, now: () => 200_000 });
+    d.reconcile();
+    expect(store.get("p", "old-idle")?.idleNotified).toBe(true);
+  });
+
+  it("reconcile does NOT set idleNotified on non-awaiting-input tasks", () => {
+    const store = createStore(dir);
+    store.put(rec("t-working", { state: "working",       lastHeartbeat: 0, heartbeatBudgetMs: 100 }));
+    store.put(rec("t-blocked", { state: "blocked",       lastHeartbeat: 0, heartbeatBudgetMs: 100 }));
+    store.put(rec("t-done",    { state: "done",          lastHeartbeat: 0, heartbeatBudgetMs: 100 }));
+    const d = createDaemon({ store, now: () => 200_000, isPidAlive: () => true });
+    d.reconcile();
+    expect(store.get("p", "t-working")?.idleNotified).toBeUndefined();
+    expect(store.get("p", "t-blocked")?.idleNotified).toBeUndefined();
+    expect(store.get("p", "t-done")?.idleNotified).toBeUndefined();
+  });
+
+  it("sweep idle-notify pass does NOT fire CREW IDLE for pre-existing awaiting-input after reconcile", () => {
+    const store = createStore(dir);
+    store.put(rec("old-idle", { state: "awaiting-input", lastHeartbeat: 0, heartbeatBudgetMs: 100 }));
+    const calls: any[] = [];
+    const d = createDaemon({ store, now: () => 200_000, notify: async (a) => { calls.push(a); } });
+    d.reconcile();   // boot-guard: marks idleNotified=true
+    d.sweep();       // idle-notify pass should skip it
+    expect(calls.filter(c => c.message?.includes("CREW IDLE")).length).toBe(0);
+  });
+
+  it("sweep idle-notify pass DOES fire CREW IDLE for tasks that go idle AFTER boot", () => {
+    const store = createStore(dir);
+    // Simulate a task that transitioned to awaiting-input after daemon start:
+    // idleNotified is false (not set by reconcile, which only ran before this task went idle),
+    // and lastHeartbeat is old enough to exceed the debounce window.
+    store.put(rec("fresh-idle", { state: "awaiting-input", lastHeartbeat: 0, heartbeatBudgetMs: 100, idleNotified: false }));
+    const calls: any[] = [];
+    const d = createDaemon({ store, now: () => 200_000, notify: async (a) => { calls.push(a); } });
+    // reconcile does NOT run here (daemon already booted; this task arrived later)
+    d.sweep();
+    expect(calls.filter(c => c.message?.includes("CREW IDLE")).length).toBe(1);
+  });
+});

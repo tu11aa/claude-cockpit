@@ -265,6 +265,15 @@ export function createDaemon(deps: DaemonDeps) {
           firePush(deps, r.project, r.state, stalled, synthEvent);
         }
       }
+      // Boot-guard: tasks already in awaiting-input when the daemon starts are
+      // parked crews from a prior session — not fresh idle events. Mark them
+      // notified so the sweep idle-notify pass doesn't fire CREW IDLE for all
+      // of them on the first tick (boot-storm, issue #185b).
+      for (const r of store.listAll()) {
+        if (r.state !== "awaiting-input") continue;
+        if (r.idleNotified) continue;
+        store.put({ ...r, idleNotified: true });
+      }
     },
   };
 }
