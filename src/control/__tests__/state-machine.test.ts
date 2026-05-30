@@ -206,6 +206,38 @@ describe("state-machine reduce", () => {
   });
 });
 
+// ── Issue #185: idleNotified reset on working transitions ───────────────────
+describe("reducer · idleNotified reset (#185)", () => {
+  function base(overrides: Partial<TaskRecord> = {}): TaskRecord {
+    return {
+      id: "t1", project: "p", provider: "claude", mode: "interactive",
+      state: "awaiting-input", task: "x", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "task.turn.completed", heartbeatBudgetMs: 300000,
+      attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }],
+      idleNotified: true,
+      ...overrides,
+    };
+  }
+
+  it("task.progress from awaiting-input → working clears idleNotified", () => {
+    const next = reduce(base(), { type: "task.progress", id: "t1" }, 2000);
+    expect(next.state).toBe("working");
+    expect(next.idleNotified).toBeFalsy();
+  });
+
+  it("task.started → working clears idleNotified", () => {
+    const next = reduce(base(), { type: "task.started", id: "t1" }, 2000);
+    expect(next.state).toBe("working");
+    expect(next.idleNotified).toBeFalsy();
+  });
+
+  it("task.turn.started → working clears idleNotified", () => {
+    const next = reduce(base(), { type: "task.turn.started", id: "t1", turnId: "t2" }, 2000);
+    expect(next.state).toBe("working");
+    expect(next.idleNotified).toBeFalsy();
+  });
+});
+
 describe("DispatchAttempt schema", () => {
   it("a fresh TaskRecord has a single attempt with attemptId, startedAt, lastHeartbeatAt", () => {
     const rec: TaskRecord = {
