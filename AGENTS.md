@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **claude-cockpit** (3604 symbols, 5970 relationships, 88 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **claude-cockpit** (3602 symbols, 5968 relationships, 88 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -62,4 +62,3 @@ Every coding task in this repo follows [`plugin/skills/karpathy-principles/SKILL
 2. **Simplicity first** — no speculative abstractions, no impossible-case error handling
 3. **Surgical changes** — every changed line traces to the request; no drive-by refactors
 4. **Goal-driven execution** — define verifiable success criteria before implementing
-# Memory Context
