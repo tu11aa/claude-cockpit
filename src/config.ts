@@ -87,18 +87,19 @@ export function getDefaultConfig(): CockpitConfig {
       permissions: {
         command: "auto",
         captain: "auto",
+        crew: "auto",
       },
       models: {
         command: "opus",
         captain: "opus",
-        crew: "sonnet",
+        crew: "opus",
         exploration: "haiku",
         review: "opus",
       },
       roles: {
         command: { agent: "claude", model: "opus" },
         captain: { agent: "claude", model: "opus" },
-        crew: { agent: "claude", model: "sonnet" },
+        crew: { agent: "claude", model: "opus" },
         exploration: { agent: "claude", model: "haiku" },
       },
     },
