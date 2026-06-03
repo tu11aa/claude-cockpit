@@ -30,6 +30,9 @@ export const DEFAULT_STATE_ROOT = join(homedir(), ".config", "cockpit", "state")
 // How often the in-cmux probe scrapes interactive crew panes for a block. The
 // daemon can't do this (launchd can't connect to cmux), so it lives here.
 export const PROBE_INTERVAL_MS = 10_000;
+// Entries older than this at relay-boot time are silently acked without being
+// forwarded — they are stale events from a prior captain session or dead crews.
+export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 // A working interactive task with no heartbeat for this long is a probe
 // candidate: PostToolUse never fires while a permission prompt is up, so a
 // genuinely-blocked crew goes quiet well before the multi-minute stall budget.
@@ -92,7 +95,9 @@ interface InteractiveProbeDeps {
  *     lastHeartbeat) candidates,
  *  3. read each candidate's pane tail and skip it if the tail is unchanged
  *     since the last tick (per-task change-detection → fires once per prompt),
- *  4. classify the tail; a permission/question verdict → one task.blocked.
+ *  4. classify the tail; a permission/question verdict → one task.blocked, a
+ *     fatal error-banner verdict → one task.failed (#196 — a turn that died on a
+ *     transient API error leaves the process alive and silently stuck).
  *
  * Best-effort throughout: every read/daemon call is caught and logged; the tick
  * never throws, so a transient cmux/daemon failure can't crash the relay. The
@@ -133,18 +138,30 @@ export function createInteractiveProbe(deps: InteractiveProbeDeps): {
 
       const verdict = classifyPaneTail(tail);
       if (!verdict) continue;
-      const reason =
-        verdict.kind === "approval"
-          ? "crew awaiting permission (pane-detected)"
-          : "crew asked a question (pane-detected)";
+      // #196: a fatal error banner on a quiet working pane means the turn died
+      // (transient API error / crash) and the crew is silently stuck — fire the
+      // terminal task.failed so the captain gets CREW FAILED, not just an
+      // eventual non-alarming idle. Recoverable via `crew send` (task.reopened).
+      const event: ControlEvent =
+        verdict.kind === "error"
+          ? {
+              type: "task.failed",
+              id: rec.id,
+              error: `crew session error (pane-detected): ${verdict.text}`,
+            }
+          : {
+              type: "task.blocked",
+              id: rec.id,
+              reason:
+                verdict.kind === "approval"
+                  ? "crew awaiting permission (pane-detected)"
+                  : "crew asked a question (pane-detected)",
+              question: verdict.text,
+            };
       try {
-        await deps.sendEvent({
-          type: "task.blocked",
-          id: rec.id,
-          reason,
-          question: verdict.text,
-        });
-        deps.log(`probe -> CREW BLOCKED ${rec.name} (${verdict.kind})`);
+        await deps.sendEvent(event);
+        const label = verdict.kind === "error" ? "CREW FAILED" : "CREW BLOCKED";
+        deps.log(`probe -> ${label} ${rec.name} (${verdict.kind})`);
       } catch (e) {
         deps.log(`probe sendEvent failed for ${rec.id}: ${(e as Error).message}`);
       }
@@ -163,6 +180,8 @@ interface RunOpts {
   pollMs?: number;
   /** Probe cadence override (default PROBE_INTERVAL_MS); 0 disables the probe. */
   probeMs?: number;
+  /** Override Date.now() — useful in tests to simulate a future session start time. */
+  now?: () => number;
   log?: (m: string) => void;
 }
 
@@ -185,6 +204,8 @@ export async function runNotifyRelay(opts: RunOpts): Promise<() => void> {
     } | undefined;
   if (!captainSurface) throw new Error("no surfaces in captain workspace");
 
+  const sessionStartMs = (opts.now ?? (() => Date.now()))();
+
   const cursor = await readCursor({
     stateRoot: opts.stateRoot,
     project: opts.project,
@@ -204,6 +225,20 @@ export async function runNotifyRelay(opts: RunOpts): Promise<() => void> {
         fromSeq: lastAcked + 1,
       })) {
         if (stopped) return;
+        // Silently ack entries that pre-date this relay session by more than
+        // STALE_THRESHOLD_MS — they are leftovers from dead crews or a prior
+        // captain session and would only confuse the current captain.
+        const entryMs = new Date(entry.ts).getTime();
+        if (entryMs < sessionStartMs - STALE_THRESHOLD_MS) {
+          await writeCursor({
+            stateRoot: opts.stateRoot,
+            project: opts.project,
+            subscriber: opts.subscriber,
+            lastAckedSeq: entry.seq,
+          });
+          lastAcked = entry.seq;
+          continue;
+        }
         const msg = formatEntry(entry);
         if (msg) {
           try {
