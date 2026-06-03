@@ -17,6 +17,7 @@ import {
 } from "../drivers/index.js";
 import type { PaneRef, PanePlacement, RuntimeDriver } from "../runtimes/types.js";
 import { buildDispatchRequest, cockpitdCall, sendCodexFirstTurn } from "./crew-control.js";
+import { tailLines } from "./crew-output.js";
 import { writePerCrewSettingsLocal, writePerCrewOpencodeConfig } from "../lib/per-crew-settings.js";
 import { resolveTextInput } from "../lib/resolve-text-input.js";
 import { TERMINAL_STATES, type TaskRecord } from "../control/types.js";
@@ -606,13 +607,16 @@ crewCommand
 
 crewCommand
   .command("read")
-  .description("Read the current screen of a crew session")
+  .description("Read the current screen of a crew session (tail by default; use --full for the entire scrollback)")
   .argument("<project>", "Project name")
   .argument("<name>", "Crew name")
-  .action(async (project: string, name: string) => {
+  .option("--lines <N>", "Number of trailing lines to show", "40")
+  .option("--full", "Show the entire scrollback (overrides --lines)")
+  .action(async (project: string, name: string, opts: { lines?: string; full?: boolean }) => {
     try {
       const screen = await runCrewRead(project, name);
-      console.log(screen);
+      const out = opts.full ? screen : tailLines(screen, Number(opts.lines ?? 40));
+      console.log(out);
     } catch (err) {
       console.error(chalk.red((err as Error).message));
       process.exit(1);
