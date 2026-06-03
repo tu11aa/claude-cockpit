@@ -9,6 +9,7 @@ import { sendRequest } from "../control/protocol.js";
 import { ensureDaemon } from "../control/launchd.js";
 import type { ControlEvent, Mode, Provider, TaskRecord } from "../control/types.js";
 import { mapClaudeHookToEvent } from "../control/interactive/claude.js";
+import { filterTasks, formatCompactTasks } from "./crew-output.js";
 import { crewAttachCommand } from "./crew-attach.js";
 import { crewChatCommand } from "./crew-chat.js";
 
@@ -203,9 +204,21 @@ export function addControlPlaneCrewCommands(crew: Command): void {
   crew
     .command("tasks <project>")
     .description("List control-plane tasks for a project (control-plane analogue of legacy `list`)")
-    .action(async (project: string) => {
-      const r = await cockpitdCall({ kind: "list", project });
-      process.stdout.write(JSON.stringify(r) + "\n");
+    .option("--json", "Full JSON output (one or more records)")
+    .option("--id <taskId>", "Show only tasks matching this id prefix")
+    .option("--state <state>", "Filter by task state")
+    .option("--state-only <taskId>", "Print just the state string for a single task")
+    .action(async (project: string, opts: { json?: boolean; id?: string; state?: string; stateOnly?: string }) => {
+      const raw = (await cockpitdCall({ kind: "list", project })) as TaskRecord[];
+      let records = raw;
+      if (opts.stateOnly) {
+        records = filterTasks(records, { id: opts.stateOnly, stateOnly: true });
+        process.stdout.write(formatCompactTasks(records, { stateOnly: true }) + "\n");
+        return;
+      }
+      records = filterTasks(records, { id: opts.id, state: opts.state });
+      const compact = opts.json !== true;
+      process.stdout.write(formatCompactTasks(records, { compact }) + "\n");
     });
 
   // TODO(downstream interactive-wiring spec): deliverReply is not yet wired in
