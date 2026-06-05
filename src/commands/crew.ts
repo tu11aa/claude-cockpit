@@ -17,10 +17,19 @@ import {
 } from "../drivers/index.js";
 import type { PaneRef, PanePlacement, RuntimeDriver } from "../runtimes/types.js";
 import { buildDispatchRequest, cockpitdCall, sendCodexFirstTurn } from "./crew-control.js";
+import { tailLines } from "./crew-output.js";
 import { writePerCrewSettingsLocal, writePerCrewOpencodeConfig } from "../lib/per-crew-settings.js";
+import { addWorktree, removeWorktree } from "../lib/git-worktree.js";
+import { resolveTextInput } from "../lib/resolve-text-input.js";
 import { TERMINAL_STATES, type TaskRecord } from "../control/types.js";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
+
+// Base branch for `--worktree` crew branches. GitFlow: feature work branches
+// off develop. Chosen over "current HEAD" deliberately — basing off the
+// captain's volatile HEAD would reintroduce the coupling this isolation feature
+// exists to remove (and the captain's HEAD is exactly what gets dragged today).
+const WORKTREE_BASE_BRANCH = "develop";
 
 // Poll-based first-turn delivery: after launching the CLI, poll the pane
 // until the agent is ready to accept input. Replaces a fixed delay (was 3s).
@@ -162,6 +171,13 @@ export interface CrewSpawnInput {
   direction?: PanePlacement;
   agent?: string;
   approvalPolicy?: string;
+  /** Opt-in (#216): run this crew in its own git worktree + branch instead of
+   *  the shared root checkout. For feature tasks; small/one-off tasks omit it. */
+  worktree?: boolean;
+  /** CP3 opt-in: gate risky tools (bash) so the captain approves them.
+   *  codex maps this to approvalPolicy='untrusted'; opencode maps it to a
+   *  bash:"ask" per-crew config. Default (false) = fully autonomous. */
+  approval?: boolean;
 }
 
 export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
@@ -191,6 +207,22 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
   }
   const name = input.name ?? nextAutoName(existingTitles, input.project);
 
+  // Feature crews (--worktree) run in an isolated worktree+branch so a crew's
+  // `git checkout` can't drag the captain's (shared) HEAD. Small crews keep
+  // running on the root checkout — spawnCwd stays proj.path, behavior unchanged.
+  // Build/daemon still run from the MAIN checkout's dist (#216): worktrees edit
+  // source only. The worktree path becomes the crew's cwd via the existing cwd
+  // plumbing (dispatch record + buildCommand workdir).
+  const spawnCwd = input.worktree
+    ? addWorktree({
+        repoRoot: proj.path,
+        worktreeDir: config.defaults.worktreeDir ?? ".worktrees",
+        project: input.project,
+        name,
+        base: WORKTREE_BASE_BRANCH,
+      })
+    : proj.path;
+
   const agents = new CapabilityRegistry({
     claude: createClaudeDriver(),
     codex: createCodexDriver(),
@@ -218,7 +250,7 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     return runCodexInteractiveSpawn({
       project: input.project,
       task: input.task,
-      cwd: proj.path,
+      cwd: spawnCwd,
       runtime,
       workspaceId: captain.id,
       name,
@@ -253,7 +285,7 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
       provider: "claude",
       mode: "interactive",
       project: input.project,
-      cwd: proj.path,
+      cwd: spawnCwd,
       task: input.task,
       name,
     });
@@ -265,10 +297,10 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     // merge across *different* settings sources — only multiple --settings
     // flags collide. .claude/settings.local.json is gitignored and merges
     // with any existing user hooks (#134).
-    writePerCrewSettingsLocal({ projectCwd: proj.path });
+    writePerCrewSettingsLocal({ projectCwd: spawnCwd });
     const cliCommand = agent.buildCommand({
       prompt: input.task,
-      workdir: proj.path,
+      workdir: spawnCwd,
       role: "crew",
       promptFile,
       interactive: true,
@@ -304,7 +336,7 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
       provider: "opencode",
       mode: "interactive",
       project: input.project,
-      cwd: proj.path,
+      cwd: spawnCwd,
       task: input.task,
       name,
       // opencode has no heartbeat hook, so a normal budget would false-stall
@@ -318,10 +350,13 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
       stateRoot: path.join(os.homedir(), ".config", "cockpit", "state"),
       project: input.project,
       taskId: rec.id,
+      // CP3 opt-in: --approval gates bash so the captain approves shell commands.
+      // Without it, bash stays auto-approved (default behavior unchanged).
+      ...(input.approval ? { gateBash: true } : {}),
     });
     const cliCommand = agent.buildCommand({
       prompt: input.task,
-      workdir: proj.path,
+      workdir: spawnCwd,
       role: "crew",
       promptFile,
       interactive: true,
@@ -340,7 +375,7 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
 
   const cliCommand = agent.buildCommand({
     prompt: input.task,
-    workdir: proj.path,
+    workdir: spawnCwd,
     role: "crew",
     promptFile,
     interactive,
@@ -457,7 +492,14 @@ export async function reapCrewChildren(taskId: string, graceMs = 2000): Promise<
   const marker = `COCKPIT_CREW_TASK_ID=${taskId}`;
   try {
     const stdout = await new Promise<string>((resolve, reject) => {
-      nodeExec("ps auxE", (err, out) => (err ? reject(err) : resolve(out)));
+      // `ps auxE` dumps every process's full env, which on a busy machine far
+      // exceeds exec's default 1 MB maxBuffer (~2.7 MB with ~1k procs). Without
+      // a raised cap the call errors with "maxBuffer length exceeded", the outer
+      // catch swallows it, and the reap silently no-ops — leaving crew children
+      // alive. 64 MB comfortably covers thousands of processes.
+      nodeExec("ps auxE", { maxBuffer: 64 * 1024 * 1024 }, (err, out) =>
+        err ? reject(err) : resolve(out),
+      );
     });
     const pids: number[] = [];
     for (const line of stdout.split("\n").slice(1)) {
@@ -478,21 +520,30 @@ export async function reapCrewChildren(taskId: string, graceMs = 2000): Promise<
 
 export async function runCrewClose(project: string, name: string): Promise<void> {
   const { runtime, workspaceId } = await resolveCaptainWorkspace(project);
-  const crew = await findCrew(runtime, workspaceId, project, name);
-  if (!crew) {
-    throw new Error(`Crew '${name}' not found for ${project}. Run 'cockpit crew list ${project}'.`);
-  }
-  // Terminalize the daemon task before closing the pane (#184). Without this,
-  // non-terminal tasks (blocked/working/awaiting-input) linger in the daemon
-  // ledger and keep firing phantom CREW BLOCKED/IDLE pushes until the next
-  // daemon restart. 'cancelled' is terminal but NOT in ATTENTION_STATES, so
-  // firePush stays silent — captain initiated the close, no notification needed.
+  // resolveCaptainWorkspace already validated the project exists; reload for its
+  // root path so we can tell a worktree crew (cwd != root) from a root crew.
+  const projRoot = loadConfig().projects[project]?.path;
+  // Terminalize the daemon task FIRST — before (and independent of) finding the
+  // cmux pane (#184, hardened for #139). Without this, non-terminal tasks
+  // (blocked/working/awaiting-input) linger in the daemon ledger and keep firing
+  // phantom CREW BLOCKED/IDLE/STALLED pushes. Crucially, a DEAD crew's pane is
+  // already gone, so gating terminalization on findCrew (the old order) left that
+  // zombie record dangling forever. 'cancelled' is terminal but NOT in
+  // ATTENTION_STATES, so firePush stays silent — captain initiated the close.
   let taskId: string | undefined;
+  // Worktree to clean up after the pane closes — set only when this crew ran in
+  // its own worktree (cwd recorded by the daemon differs from the root checkout).
+  // A non-worktree crew has cwd === root (or unset), so this stays undefined and
+  // close is unaffected (#216).
+  let worktreeCwd: string | undefined;
   try {
     const tasks = (await cockpitdCall({ kind: "list", project })) as TaskRecord[];
     const task = tasks.find((t) => t.name === name);
     if (task) {
       taskId = task.id;
+      if (task.cwd && projRoot && task.cwd !== projRoot) {
+        worktreeCwd = task.cwd;
+      }
       if (!TERMINAL_STATES.has(task.state)) {
         await cockpitdCall({ kind: "event", project, event: { type: "task.cancelled", id: task.id, reason: "closed by captain" } });
       }
@@ -508,11 +559,30 @@ export async function runCrewClose(project: string, name: string): Promise<void>
   } catch {
     // Swallow daemon errors — a crew without a daemon must still close.
   }
-  await runtime.closePane(crew);
+  // Close the cmux pane if it still exists. A dead crew's pane is already gone —
+  // that is not an error (the record is terminalized above); proceed to reap
+  // children / clean the worktree. Only a genuine miss (no pane AND no daemon
+  // task) is a typo → surface the not-found error.
+  const crew = await findCrew(runtime, workspaceId, project, name);
+  if (crew) {
+    await runtime.closePane(crew);
+  } else if (taskId === undefined) {
+    throw new Error(`Crew '${name}' not found for ${project}. Run 'cockpit crew list ${project}'.`);
+  }
   // Reap any surviving child processes (vitest workers, node subprocs, etc.)
   // that the cmux pane-close cascade may have missed.
   if (taskId !== undefined) {
     await reapCrewChildren(taskId);
+  }
+  // Auto-clean the crew's worktree AFTER its processes are gone, so we don't
+  // yank a dir out from under a live shell. Best-effort: a failed removal must
+  // not break close (the branch is preserved regardless).
+  if (worktreeCwd && projRoot) {
+    try {
+      removeWorktree(projRoot, worktreeCwd);
+    } catch (e) {
+      process.stderr.write(`(worktree remove failed: ${(e as Error).message})\n`);
+    }
   }
 }
 
@@ -535,25 +605,31 @@ crewCommand
     "Spawn an interactive crew session as a tab in the captain's workspace (use --direction to split into a pane instead)",
   )
   .argument("<project>", "Project name (must be registered)")
-  .argument("<task>", "Initial task prompt for the crew session")
+  .argument("[task]", "Initial task prompt for the crew session (omit with --task-file)")
   .option("--name <name>", "Crew name (default: auto-generated crew-N)")
   .option("--direction <dir>", "Placement: tab (default) or split direction (right|left|up|down)", "tab")
   .option("--agent <name>", "Agent CLI to use (claude|codex|gemini|opencode)", "claude")
-  .option("--approval", "force codex approvalPolicy='untrusted' (codex only; exercises gate primitive)", false)
+  .option("--approval", "gate risky tools so the captain approves them (codex: approvalPolicy='untrusted'; opencode: bash:'ask')", false)
+  .option("--worktree", "run the crew in its own git worktree + branch (feature tasks; small tasks omit to share the root checkout)", false)
+  .option("--task-file <path>", "Read task prompt from file instead of positional arg ('-' for stdin)")
   .action(
     async (
       project: string,
-      task: string,
-      opts: { name?: string; direction: PanePlacement; agent: string; approval: boolean },
+      task: string | undefined,
+      opts: { name?: string; direction: PanePlacement; agent: string; approval: boolean; worktree: boolean; taskFile?: string },
     ) => {
       try {
+        const resolvedTask = await resolveTextInput({ positional: task, filePath: opts.taskFile, label: "task" });
         const pane = await runCrewSpawn({
           project,
-          task,
+          task: resolvedTask,
           name: opts.name,
           direction: opts.direction,
           agent: opts.agent,
-          ...(opts.approval ? { approvalPolicy: "untrusted" } : {}),
+          // --approval is provider-agnostic: codex consumes approvalPolicy,
+          // opencode consumes the `approval` flag (→ bash:"ask" per-crew config).
+          ...(opts.approval ? { approvalPolicy: "untrusted", approval: true } : {}),
+          ...(opts.worktree ? { worktree: true } : {}),
         });
         console.log(chalk.green(`✔ Crew '${pane.title}' spawned (${pane.surfaceId})`));
       } catch (err) {
@@ -588,10 +664,12 @@ crewCommand
   .description("Send a follow-up message to an existing crew session")
   .argument("<project>", "Project name")
   .argument("<name>", "Crew name (e.g. crew-1)")
-  .argument("<message>", "Message to send")
-  .action(async (project: string, name: string, message: string) => {
+  .argument("[message]", "Message to send (omit with --message-file)")
+  .option("--message-file <path>", "Read message from file instead of positional arg ('-' for stdin)")
+  .action(async (project: string, name: string, message: string | undefined, opts: { messageFile?: string }) => {
     try {
-      await runCrewSend(project, name, message);
+      const resolvedMessage = await resolveTextInput({ positional: message, filePath: opts.messageFile, label: "message" });
+      await runCrewSend(project, name, resolvedMessage);
       console.log(chalk.green(`✔ Sent to ${project}:${name}`));
     } catch (err) {
       console.error(chalk.red((err as Error).message));
@@ -601,13 +679,16 @@ crewCommand
 
 crewCommand
   .command("read")
-  .description("Read the current screen of a crew session")
+  .description("Read the current screen of a crew session (tail by default; use --full for the entire scrollback)")
   .argument("<project>", "Project name")
   .argument("<name>", "Crew name")
-  .action(async (project: string, name: string) => {
+  .option("--lines <N>", "Number of trailing lines to show", "40")
+  .option("--full", "Show the entire scrollback (overrides --lines)")
+  .action(async (project: string, name: string, opts: { lines?: string; full?: boolean }) => {
     try {
       const screen = await runCrewRead(project, name);
-      console.log(screen);
+      const out = opts.full ? screen : tailLines(screen, Number(opts.lines ?? 40));
+      console.log(out);
     } catch (err) {
       console.error(chalk.red((err as Error).message));
       process.exit(1);

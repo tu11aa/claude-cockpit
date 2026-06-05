@@ -12,6 +12,7 @@ import { CodexInteractiveDriver, shouldReattachCodex } from "./codex/driver.js";
 import { OpencodeSseBridge } from "./opencode/sse-bridge.js";
 import { makeGate } from "./codex/gate.js";
 import { appendToMailbox, rotateIfNeeded } from "./mailbox.js";
+import { createSurfaceLivenessProbe } from "./crew-pane-reader.js";
 import { readdir } from "node:fs/promises";
 import type { Gate, TaskRecord, ControlEvent } from "./types.js";
 import { TERMINAL_STATES } from "./types.js";
@@ -22,6 +23,9 @@ export interface CockpitdOpts {
   sockPath?: string;
   sweepMs?: number; // 0 disables the interval (tests)
   isPidAlive?: (pid: number) => boolean; // injectable for the headless reconcile path (tests)
+  // injectable for the #139 interactive surface-liveness reaper (tests); defaults
+  // to the real cmux probe. Returns "alive" | "gone" | "unknown".
+  isSurfaceAlive?: (rec: TaskRecord) => Promise<"alive" | "gone" | "unknown">;
   spawn?: typeof realSpawn;
   /**
    * Push-notification hook (#109). Defaults to appending a structured event
@@ -57,6 +61,8 @@ export interface CockpitdOpts {
   opencodeBridge?: {
     start: (o: { taskId: string; port: number }) => void;
     stop: (taskId: string) => void;
+    /** CP3: POST the captain's approve/deny decision to the crew's server. */
+    answer: (taskId: string, decision: "approve" | "deny") => Promise<boolean>;
   };
 }
 
@@ -182,6 +188,13 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       const found = store.listAll().find((r) => r.id === ev.id);
       if (!found) return;
       void d.handle({ kind: "event", project: found.project, event: ev });
+      // CP3: a gated permission must become a resolvable gate so the captain can
+      // approve/deny via `crew reply --gate`. Opencode crews never attach a
+      // renderer (no `crew attach`), so schedulePromotion always fires after the
+      // grace window — mirroring the codex emit hook below.
+      if (ev.type === "task.approval.requested") {
+        schedulePromotion(ev.id, ev.requestId, "approval", ev.question);
+      }
     },
     log,
   });
@@ -207,6 +220,9 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
         project: args.project,
         taskRecord: args.record,
         event: args.event,
+        // Persist the daemon-rendered message (#214/#210): the relay delivers it
+        // verbatim instead of re-deriving from the raw event (which drifted).
+        message: args.message,
       });
     } catch (e) {
       log(`mailbox append failed project=${args.project}: ${(e as Error).message}`);
@@ -216,6 +232,9 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
 
   const d = createDaemon({
     store, now: () => Date.now(), isPidAlive, notify,
+    // #139 backstop: terminalize interactive crews whose cmux pane is provably
+    // gone (sweep/reconcile reaper). Three-valued; "unknown" never reaps.
+    isSurfaceAlive: opts.isSurfaceAlive ?? createSurfaceLivenessProbe(),
     launchHeadless: async (rec) => {
       await runHeadless({
         provider: rec.provider, task: rec.task, id: rec.id, sessionId: rec.sessionId,
@@ -253,42 +272,66 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       );
     },
     resolveInteractiveGate: async (taskId, payload) => {
-      try { await codexDriver.answer(taskId, payload); }
-      catch (e) { log(`gate-resolve answer failed: ${(e as Error).message}`); }
+      // Route the captain's decision to the owning provider's driver. Opencode
+      // crews resolve via the SSE bridge (POST to the crew's server); codex via
+      // its app-server respondToServerRequest. Provider comes from the record.
+      const rec = store.listAll().find((r) => r.id === taskId);
+      try {
+        if (rec?.provider === "opencode") {
+          // Only an explicit "approve" approves; any other reply (incl. an
+          // ambiguous one) denies — never auto-approve a permission gate.
+          const decision = (payload as { decision?: string })?.decision === "approve" ? "approve" : "deny";
+          await opencodeBridge.answer(taskId, decision);
+        } else {
+          await codexDriver.answer(taskId, payload);
+        }
+      } catch (e) { log(`gate-resolve answer failed: ${(e as Error).message}`); }
     },
   });
 
-  d.reconcile(); // crash recovery on boot
+  // Crash recovery on boot. reconcile() is async (#139: it consults the
+  // interactive surface-liveness probe to reap dead crews instead of stalling
+  // them), so run it — and the reattach loops that depend on its terminalizing a
+  // dead crew before we re-subscribe it — inside an async IIFE. startCockpitd
+  // stays synchronous (returns the handle immediately); boot recovery settles
+  // shortly after. Errors are swallowed: a flaky probe must not crash boot.
+  void (async () => {
+    try {
+      await d.reconcile();
+    } catch (e) {
+      log(`reconcile on boot failed: ${(e as Error).message}`);
+    }
 
-  // Restart-reattach (spec §5; closes interactive slice of #86):
-  // For each LIVE interactive-codex task that has a resumeRef, fire reattach()
-  // against the driver. Fire-and-forget; failures are logged only.
-  //
-  // Guard against the reattach storm: resuming a thread re-spawns its per-thread
-  // MCP servers (gitnexus/pay), so blindly reattaching every non-terminal codex
-  // task means each daemon restart re-spawns one MCP set per HISTORICAL crew —
-  // which exhausted RAM (22 zombie tasks → 22 gitnexus servers on one boot).
-  // Skip terminal tasks (done/failed/cancelled — incl. crews closed via the new
-  // codex-close archive) AND stale tasks whose crew pane is long gone (no
-  // heartbeat within the staleness window — the watchdog would stall them too).
-  const bootNow = Date.now();
-  const REATTACH_STALE_MS = 10 * 60_000;
-  for (const rec of store.listAll()) {
-    if (!shouldReattachCodex(rec, bootNow, REATTACH_STALE_MS)) continue;
-    codexDriver.reattach(rec).catch((e: unknown) => {
-      log(`reattach failed for ${rec.id}: ${(e as Error).message}`);
-    });
-  }
+    // Restart-reattach (spec §5; closes interactive slice of #86):
+    // For each LIVE interactive-codex task that has a resumeRef, fire reattach()
+    // against the driver. Fire-and-forget; failures are logged only.
+    //
+    // Guard against the reattach storm: resuming a thread re-spawns its per-thread
+    // MCP servers (gitnexus/pay), so blindly reattaching every non-terminal codex
+    // task means each daemon restart re-spawns one MCP set per HISTORICAL crew —
+    // which exhausted RAM (22 zombie tasks → 22 gitnexus servers on one boot).
+    // Skip terminal tasks (done/failed/cancelled — incl. crews closed via the new
+    // codex-close archive AND #139's surface-reaped crews) AND stale tasks whose
+    // crew pane is long gone (no heartbeat within the staleness window).
+    const bootNow = Date.now();
+    const REATTACH_STALE_MS = 10 * 60_000;
+    for (const rec of store.listAll()) {
+      if (!shouldReattachCodex(rec, bootNow, REATTACH_STALE_MS)) continue;
+      codexDriver.reattach(rec).catch((e: unknown) => {
+        log(`reattach failed for ${rec.id}: ${(e as Error).message}`);
+      });
+    }
 
-  // Re-subscribe the opencode SSE bridge after a daemon bounce: the crew's
-  // cmux pane (and its `opencode --port <N>` server) survives a daemon restart,
-  // so a non-terminal opencode crew with a known serverPort can be re-attached.
-  for (const rec of store.listAll()) {
-    if (rec.provider !== "opencode" || rec.mode !== "interactive") continue;
-    if (TERMINAL_STATES.has(rec.state)) continue;
-    if (!rec.serverPort) continue;
-    opencodeBridge.start({ taskId: rec.id, port: rec.serverPort });
-  }
+    // Re-subscribe the opencode SSE bridge after a daemon bounce: the crew's
+    // cmux pane (and its `opencode --port <N>` server) survives a daemon restart,
+    // so a non-terminal opencode crew with a known serverPort can be re-attached.
+    for (const rec of store.listAll()) {
+      if (rec.provider !== "opencode" || rec.mode !== "interactive") continue;
+      if (TERMINAL_STATES.has(rec.state)) continue;
+      if (!rec.serverPort) continue;
+      opencodeBridge.start({ taskId: rec.id, port: rec.serverPort });
+    }
+  })();
 
   const server = startServer(sockPath, {
     handler: async (msg: any) => {
@@ -336,7 +379,17 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
 
   let timer: NodeJS.Timeout | undefined;
   if (opts.sweepMs && opts.sweepMs > 0) {
-    timer = setInterval(() => d.sweep(), opts.sweepMs);
+    // sweep() is async (#139: it probes cmux surface liveness). Guard against an
+    // overlapping run if a probe is slow — skip this tick rather than stacking
+    // sweeps. Errors are swallowed so a flaky probe never crashes the daemon.
+    let sweeping = false;
+    timer = setInterval(() => {
+      if (sweeping) return;
+      sweeping = true;
+      void d.sweep()
+        .catch((e: unknown) => log(`sweep failed: ${(e as Error).message}`))
+        .finally(() => { sweeping = false; });
+    }, opts.sweepMs);
     timer.unref?.();
   }
 

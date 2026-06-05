@@ -11,6 +11,17 @@ export interface DaemonDeps {
   deliverReply?: (rec: TaskRecord, message: string) => Promise<void>;
   /** Defaults to a real process.kill(pid,0) check at the call site (Task 17). */
   isPidAlive?: (pid: number) => boolean;
+  /**
+   * #139 backstop: the interactive analogue of isPidAlive. Resolves whether an
+   * interactive crew's backing cmux surface (pane/tab) still exists. Three-valued
+   * so a transient cmux outage never false-reaps a live crew:
+   *   - "alive"   → the crew's pane is present; keep watching.
+   *   - "gone"    → cmux answered AND the pane is provably absent → terminalize.
+   *   - "unknown" → could not determine (cmux down, no captain, error) → do nothing.
+   * Defaults to always-"unknown" (never reaps) when not wired — pure unit tests
+   * and any non-cmux deployment are unaffected.
+   */
+  isSurfaceAlive?: (rec: TaskRecord) => Promise<"alive" | "gone" | "unknown">;
   /** Wired in cockpitd to runHeadless; absent in pure unit tests. */
   launchHeadless?: (rec: TaskRecord) => Promise<void>;
   /**
@@ -43,20 +54,39 @@ export interface DaemonDeps {
 // firePush prev===next guard keeps it from re-firing while the task sits idle.
 const ATTENTION_STATES: ReadonlySet<TaskState> = new Set(["done", "blocked", "failed", "stalled", "awaiting-input"]);
 
+// #139: non-terminal, post-launch states an interactive crew can be sitting in
+// while its session has actually died. Any of these with a provably-gone surface
+// is a zombie → reap to 'cancelled'. 'submitted' is excluded: it is pre-launch
+// (no surface yet), so reaping it would race the spawn.
+const REAPABLE_SURFACE_STATES: ReadonlySet<TaskState> = new Set(["working", "stalled", "awaiting-input", "blocked"]);
+
+// #210: CREW IDLE (awaiting-input) is debounced — suppressed when the turn-end
+// lands within this window of the captain's own last turn to the crew (a
+// `crew send`/reply emits task.started). This silences the rapid
+// send→respond→turn-end churn of an active back-and-forth while still
+// delivering a genuine self-idle (turn-end / idle-watchdog long after the
+// captain last engaged). Only awaiting-input is debounced; every other
+// attention state always delivers.
+export const IDLE_DEBOUNCE_MS = 12_000;
+
 function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
-function formatMessage(rec: TaskRecord): string | null {
+function formatMessage(rec: TaskRecord, event?: ControlEvent): string | null {
   const tag = `[${rec.provider}/${rec.name != null ? rec.name : shortId(rec.id)}]`;
   switch (rec.state) {
     case "done": {
-      // Spec: "<resultRef-content-first-line-or-the-task-snippet>".
-      // resultRef content lives on disk; for daemon-purity we don't read it
-      // here. The task snippet is the documented fallback and gives the
-      // captain enough context to know which crew finished.
-      const snippet = (rec.task ?? "").split(/\r?\n/)[0]?.trim().slice(0, 120) ?? "";
-      return `CREW DONE ${tag}: ${snippet}`;
+      // Prefer the crew's own done message (`signal done --message`), carried on
+      // the task.done event — this is what captains relied on under the old
+      // relay formatter and must not regress (#214 unification). The task
+      // snippet is the documented fallback when no message was provided.
+      const doneMsg = event?.type === "task.done" ? event.message : undefined;
+      const body =
+        doneMsg != null && doneMsg.trim().length > 0
+          ? doneMsg.split(/\r?\n/)[0].trim().slice(0, 200)
+          : ((rec.task ?? "").split(/\r?\n/)[0]?.trim().slice(0, 120) ?? "");
+      return `CREW DONE ${tag}: ${body}`;
     }
     case "blocked":
       return `CREW BLOCKED ${tag}: ${(rec.question ?? "(no question)").trim()}`;
@@ -77,11 +107,22 @@ function firePush(
   prev: TaskState,
   next: TaskRecord,
   event: ControlEvent,
+  lastCaptainTurnAt?: number,
 ): void {
   if (!deps.notify) return;
   if (prev === next.state) return;
   if (!ATTENTION_STATES.has(next.state)) return;
-  const message = formatMessage(next);
+  // #210 idle debounce: a turn-end (awaiting-input) within IDLE_DEBOUNCE_MS of
+  // the captain's last turn is part of an active back-and-forth — suppress the
+  // CREW IDLE. All other attention states are never debounced.
+  if (
+    next.state === "awaiting-input" &&
+    lastCaptainTurnAt != null &&
+    deps.now() - lastCaptainTurnAt <= IDLE_DEBOUNCE_MS
+  ) {
+    return;
+  }
+  const message = formatMessage(next, event);
   if (!message) return;
   // Fire-and-forget; swallow errors so the daemon never trips on a flaky
   // notifier. Sync throws and async rejections both land here.
@@ -105,6 +146,11 @@ type Req =
 
 export function createDaemon(deps: DaemonDeps) {
   const { store, now } = deps;
+  // #210: per-task timestamp of the captain's most recent turn (a `crew send`/
+  // reply/answer emits task.started). Used to debounce CREW IDLE during an
+  // active back-and-forth. Bounded by the live task set; never read after a
+  // task terminates (terminal states don't transition to awaiting-input).
+  const lastCaptainTurnAt = new Map<string, number>();
   return {
     async handle(req: Req): Promise<TaskRecord | TaskRecord[]> {
       switch (req.kind) {
@@ -142,10 +188,13 @@ export function createDaemon(deps: DaemonDeps) {
         case "event": {
           const cur = store.get(req.project, req.event.id);
           if (!cur) throw new Error(`unknown task ${req.event.id}`);
+          // A captain turn (crew send/reply) arrives as task.started → record it
+          // so a quick trailing turn-end is debounced (#210).
+          if (req.event.type === "task.started") lastCaptainTurnAt.set(req.event.id, now());
           const next = reduce(cur, req.event, now());
           if (next !== cur) {
             store.put(next); // skip redundant write on terminal no-ops
-            firePush(deps, req.project, cur.state, next, req.event);
+            firePush(deps, req.project, cur.state, next, req.event, lastCaptainTurnAt.get(next.id));
           }
           return next;
         }
@@ -160,6 +209,8 @@ export function createDaemon(deps: DaemonDeps) {
           const r = store.get(req.project, req.id);
           if (!r) throw new Error(`unknown task ${req.id}`);
           if (r.state !== "blocked") throw new Error(`task ${req.id} is not blocked (state=${r.state})`);
+          // The captain's answer is a turn to the crew (#210 debounce key).
+          lastCaptainTurnAt.set(r.id, now());
           const next = reduce(r, { type: "task.started", id: r.id }, now());
           store.put(next); // persist the transition before delivering (durable first)
           if (deps.deliverReply) await deps.deliverReply(r, req.message);
@@ -182,9 +233,25 @@ export function createDaemon(deps: DaemonDeps) {
         default: { const _exhaustive: never = req; throw new Error(`unhandled request kind`); }
       }
     },
-    sweep(): void {
+    async sweep(): Promise<void> {
       const t = now();
+      const surfaceAlive = deps.isSurfaceAlive ?? (async () => "unknown" as const);
       for (const r of store.listAll()) {
+        // #139 backstop: reap interactive records whose backing surface is
+        // PROVABLY gone (crew session died with no terminal signal — opencode has
+        // no SessionEnd hook, and a hard kill can drop claude's). This is
+        // liveness-based reaping, NOT a shorter timeout: the 24h heartbeat budget
+        // is untouched, so a legitimately-idle LIVE crew is never reaped (its
+        // surface answers "alive" and falls through to evaluateStall → CREW IDLE).
+        // "unknown" (cmux down) never reaps. cancelled is silent (not in
+        // ATTENTION_STATES) — no false CREW STALLED re-emitted.
+        if (r.mode === "interactive" && REAPABLE_SURFACE_STATES.has(r.state)) {
+          const liveness = await surfaceAlive(r);
+          if (liveness === "gone") {
+            store.put({ ...r, state: "cancelled", lastEvent: "sweep.surface-gone" });
+            continue;
+          }
+        }
         const idle = evaluateStall(r, t);
         if (idle) {
           store.put(idle);
@@ -195,7 +262,7 @@ export function createDaemon(deps: DaemonDeps) {
             idle.state === "awaiting-input"
               ? { type: "task.idle", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs }
               : { type: "task.stalled", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs };
-          firePush(deps, r.project, r.state, idle, synthEvent);
+          firePush(deps, r.project, r.state, idle, synthEvent, lastCaptainTurnAt.get(r.id));
           continue;
         }
         const recovered = recoverStall(r, t);
@@ -203,8 +270,9 @@ export function createDaemon(deps: DaemonDeps) {
         if (recovered && t - r.lastHeartbeat <= r.heartbeatBudgetMs) store.put(recovered);
       }
     },
-    reconcile(): void {
+    async reconcile(): Promise<void> {
       const alive = deps.isPidAlive ?? (() => true);
+      const surfaceAlive = deps.isSurfaceAlive ?? (async () => "unknown" as const);
       for (const r of store.listAll()) {
         if (r.state !== "working" && r.state !== "submitted") continue;
         if (r.mode === "headless") {
@@ -219,16 +287,18 @@ export function createDaemon(deps: DaemonDeps) {
             id: r.id,
             error: failed.error ?? "reconcile",
           };
-          firePush(deps, r.project, r.state, failed, synthEvent);
+          firePush(deps, r.project, r.state, failed, synthEvent, lastCaptainTurnAt.get(r.id));
         } else {
-          const stalled: TaskRecord = { ...r, state: "stalled", lastEvent: "reconcile" };
-          store.put(stalled);
-          const synthEvent: ControlEvent = {
-            type: "task.reconcile-failed",
-            id: r.id,
-            reason: "interactive task lost on daemon restart",
-          };
-          firePush(deps, r.project, r.state, stalled, synthEvent);
+          // #139: an interactive crew's cmux pane SURVIVES a daemon bounce, so a
+          // live crew must stay 'working' for the reattach loop to re-subscribe
+          // it. The old unconditional → 'stalled' both false-stalled live crews
+          // AND fired CREW STALLED on every restart. Reap ONLY when the surface
+          // is provably gone; alive/unknown stay working (sweep re-checks later).
+          const liveness = await surfaceAlive(r);
+          if (liveness === "gone") {
+            store.put({ ...r, state: "cancelled", lastEvent: "reconcile.surface-gone" });
+            // silent — the crew is gone; no alarming push (consistent with close).
+          }
         }
       }
     },

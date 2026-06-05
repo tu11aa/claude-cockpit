@@ -107,7 +107,11 @@ cockpit crew send <project> <name> "<message>"
 
 ```bash
 cockpit crew list <project>                 # see all live crews for the project
-cockpit crew read <project> <name>          # read the crew's current screen
+cockpit crew tasks <project>                # compact task listing (use --json for verbose)
+cockpit crew tasks <project> --state-only <id>  # fast state check (prints one word)
+cockpit crew read <project> <name>          # read tail of a crew's screen (~40 lines)
+cockpit crew read <project> <name> --full   # entire scrollback (may be large)
+cockpit crew read <project> <name> --lines 100  # custom tail length
 cockpit crew close <project> <name>         # shutdown the crew (closes its tab)
 ```
 
@@ -148,10 +152,11 @@ cockpit crew spawn brove "Fix typo in README" --direction right
 ## Task Coordination
 
 You don't have an Agent Team or `TaskCreate`/`TaskUpdate` tools — those were Claude-specific. Track crew progress by:
-1. `cockpit crew read <project> <name>` — read the crew's screen directly from CLI.
-2. `cockpit crew list <project>` — see all live crews and pick the right one.
-3. Inspecting the crew tab visually in cmux when you want richer context (you have its surface ref from the spawn output).
-4. Asking the user to check the dashboard if you need a cross-project view (see issue #44).
+1. `cockpit crew read <project> <name>` — read tail of a crew's screen (default ~40 lines; `--full` for entire scrollback).
+2. `cockpit crew tasks <project>` — compact task listing (one line per task); `--id <prefix>` to filter; `--state-only <id>` for single-word state.
+3. `cockpit crew list <project>` — see all live crews and pick the right one.
+4. Inspecting the crew tab visually in cmux when you want richer context (you have its surface ref from the spawn output).
+5. Asking the user to check the dashboard if you need a cross-project view (see issue #44).
 
 When a crew sends you a status message via `cockpit runtime send <project> "<message>"`, it lands in your captain pane. Acknowledge, then update your handoff if a meaningful decision was made.
 

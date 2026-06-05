@@ -78,6 +78,13 @@ vi.mock("../../lib/per-crew-settings.js", () => ({
   writePerCrewOpencodeConfig,
 }));
 
+const addWorktree = vi.hoisted(() => vi.fn());
+const removeWorktree = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/git-worktree.js", () => ({
+  addWorktree,
+  removeWorktree,
+}));
+
 const existsSyncMock = vi.hoisted(() => vi.fn());
 const readFileSyncMock = vi.hoisted(() => vi.fn());
 vi.mock("node:fs", async (importOriginal) => {
@@ -128,6 +135,8 @@ describe("cockpit crew spawn", () => {
     writePerCrewSettingsLocal.mockReturnValue("/tmp/brove/.claude/settings.local.json");
     writePerCrewOpencodeConfig.mockReset();
     writePerCrewOpencodeConfig.mockReturnValue("/tmp/per-crew/opencode.json");
+    addWorktree.mockReset();
+    removeWorktree.mockReset();
     existsSyncMock.mockReset();
     readFileSyncMock.mockReset();
     // Default: pretend the codex role template is absent so older tests that
@@ -189,6 +198,73 @@ describe("cockpit crew spawn", () => {
     expect(result.title).toBe("🔧 brove:crew-1");
   });
 
+  it("--worktree creates an isolated worktree and spawns the crew with its path as cwd", async () => {
+    loadConfig.mockReturnValue(baseConfig);
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("claude --append-system-prompt-file /tmp/crew.md");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-wt1" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-wt1", project: "brove", provider: "claude", mode: "interactive" });
+    const wtPath = "/tmp/brove/.worktrees/brove-crew-1";
+    addWorktree.mockReturnValue(wtPath);
+
+    const promise = runCrewSpawn({ project: "brove", task: "do the thing", worktree: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    // Worktree created from config.worktreeDir, off the develop base branch.
+    expect(addWorktree).toHaveBeenCalledWith({
+      repoRoot: "/tmp/brove",
+      worktreeDir: ".worktrees",
+      project: "brove",
+      name: "crew-1",
+      base: "develop",
+    });
+    // The crew runs in the worktree, not the shared root checkout.
+    expect(buildDispatchRequest).toHaveBeenCalledWith(expect.objectContaining({ cwd: wtPath }));
+    expect(buildCommand).toHaveBeenCalledWith(expect.objectContaining({ workdir: wtPath }));
+    expect(writePerCrewSettingsLocal).toHaveBeenCalledWith(expect.objectContaining({ projectCwd: wtPath }));
+  });
+
+  it("without --worktree never creates a worktree (cwd stays the root checkout)", async () => {
+    loadConfig.mockReturnValue(baseConfig);
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("claude ...");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-nowt" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-nowt" });
+
+    const promise = runCrewSpawn({ project: "brove", task: "do the thing" });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    expect(addWorktree).not.toHaveBeenCalled();
+    expect(buildDispatchRequest).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/tmp/brove" }));
+    expect(buildCommand).toHaveBeenCalledWith(expect.objectContaining({ workdir: "/tmp/brove" }));
+  });
+
+  it("--worktree threads a custom config.worktreeDir into worktree creation", async () => {
+    loadConfig.mockReturnValue({
+      ...baseConfig,
+      defaults: { ...baseConfig.defaults, worktreeDir: ".wt" },
+    });
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("claude ...");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-wtc" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-wtc" });
+    addWorktree.mockReturnValue("/tmp/brove/.wt/brove-crew-1");
+
+    const promise = runCrewSpawn({ project: "brove", task: "task", worktree: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    expect(addWorktree).toHaveBeenCalledWith(expect.objectContaining({ worktreeDir: ".wt" }));
+  });
+
   it("auto-names the next crew based on existing tabs (crew-1 + crew-3 → crew-2)", async () => {
     loadConfig.mockReturnValue(baseConfig);
     status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
@@ -247,6 +323,8 @@ describe("cockpit crew spawn", () => {
       project: "brove",
       taskId: "task-oc1",
     }));
+    // CP3 default unchanged: without --approval, bash is NOT gated.
+    expect(writePerCrewOpencodeConfig.mock.calls[0][0].gateBash).toBeFalsy();
     expect(buildCommand).toHaveBeenCalledWith(expect.objectContaining({ interactive: true }));
     expect(newPane).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: "workspace:5",
@@ -263,6 +341,22 @@ describe("cockpit crew spawn", () => {
       { workspaceId: "workspace:5", surfaceId: "surface:9" },
       "do the thing",
     ]);
+  });
+
+  it("--approval gates bash for opencode crews (CP3 opt-in → gateBash:true)", async () => {
+    loadConfig.mockReturnValue(baseConfig);
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("opencode");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-oc2" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-oc2", project: "brove", provider: "opencode", mode: "interactive" });
+
+    const promise = runCrewSpawn({ project: "brove", task: "do it", agent: "opencode", approval: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    expect(writePerCrewOpencodeConfig).toHaveBeenCalledWith(expect.objectContaining({ gateBash: true }));
   });
 
   it("--agent codex routes through the control-plane daemon and opens an attach tab in the captain", async () => {
@@ -622,6 +716,7 @@ describe("cockpit crew send/read/close/list", () => {
     loadConfig.mockReturnValue(baseConfig);
     status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
     cockpitdCall.mockReset();
+    removeWorktree.mockReset();
   });
 
   it("send delivers a message to the matching crew tab", async () => {
@@ -735,6 +830,43 @@ describe("cockpit crew send/read/close/list", () => {
     });
   });
 
+  it("close removes the crew's worktree when its task ran in one (cwd != root)", async () => {
+    listSurfaces.mockResolvedValue([
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+    ]);
+    const wtPath = "/tmp/brove/.worktrees/brove-crew-1";
+    cockpitdCall.mockImplementation(async (req: unknown) => {
+      const r = req as { kind: string };
+      if (r.kind === "list") {
+        return [{ id: "task-wt-1", name: "crew-1", project: "brove", state: "done", provider: "claude", mode: "interactive", task: "task", cwd: wtPath, createdAt: 1000, lastHeartbeat: 1000, lastEvent: "task.done", heartbeatBudgetMs: 300000, attempts: [] }];
+      }
+      return undefined;
+    });
+
+    await runCrewClose("brove", "crew-1");
+
+    expect(removeWorktree).toHaveBeenCalledWith("/tmp/brove", wtPath);
+    expect(closePane).toHaveBeenCalled();
+  });
+
+  it("close does NOT remove a worktree for a non-worktree crew (cwd == root)", async () => {
+    listSurfaces.mockResolvedValue([
+      { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
+    ]);
+    cockpitdCall.mockImplementation(async (req: unknown) => {
+      const r = req as { kind: string };
+      if (r.kind === "list") {
+        return [{ id: "task-root-1", name: "crew-1", project: "brove", state: "done", provider: "claude", mode: "interactive", task: "task", cwd: "/tmp/brove", createdAt: 1000, lastHeartbeat: 1000, lastEvent: "task.done", heartbeatBudgetMs: 300000, attempts: [] }];
+      }
+      return undefined;
+    });
+
+    await runCrewClose("brove", "crew-1");
+
+    expect(removeWorktree).not.toHaveBeenCalled();
+    expect(closePane).toHaveBeenCalled();
+  });
+
   it("close emits task.cancelled for a non-terminal crew task before closing the pane (#184)", async () => {
     listSurfaces.mockResolvedValue([
       { workspaceId: "workspace:5", surfaceId: "surface:10", title: "🔧 brove:crew-1" },
@@ -786,6 +918,41 @@ describe("cockpit crew send/read/close/list", () => {
     await runCrewClose("brove", "crew-1");
 
     expect(closePane).toHaveBeenCalled();
+  });
+
+  // #139: a dead crew's pane is already gone, but its daemon task record still
+  // dangles in a non-terminal state. close must terminalize that record even
+  // when there is no pane to close — gating terminalization on findCrew left
+  // the zombie record to re-emit false CREW STALLED forever.
+  it("close terminalizes the daemon task when the crew pane is already gone (#139)", async () => {
+    listSurfaces.mockResolvedValue([]); // pane gone — crew session died
+    cockpitdCall.mockImplementation(async (req: unknown) => {
+      const r = req as { kind: string };
+      if (r.kind === "list") {
+        return [{ id: "task-dead-1", name: "crew-1", project: "brove", state: "working", provider: "claude", mode: "interactive", task: "task", createdAt: 1000, lastHeartbeat: 1000, lastEvent: "task.started", heartbeatBudgetMs: 86400000, attempts: [] }];
+      }
+      return undefined;
+    });
+
+    await runCrewClose("brove", "crew-1"); // must NOT throw
+
+    expect(cockpitdCall).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "event",
+      project: "brove",
+      event: { type: "task.cancelled", id: "task-dead-1", reason: "closed by captain" },
+    }));
+    expect(closePane).not.toHaveBeenCalled(); // no pane to close
+  });
+
+  it("close throws when neither a pane nor a daemon task exists (typo guard) (#139)", async () => {
+    listSurfaces.mockResolvedValue([]); // no pane
+    cockpitdCall.mockImplementation(async (req: unknown) => {
+      const r = req as { kind: string };
+      if (r.kind === "list") return []; // no daemon task either
+      return undefined;
+    });
+
+    await expect(runCrewClose("brove", "ghost")).rejects.toThrow(/not found/i);
   });
 
   it("list returns all crews for the project, ignoring non-crew tabs", async () => {
