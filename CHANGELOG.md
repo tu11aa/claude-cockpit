@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-05
+
+A daemon-reliability and crew-safety patch release. The headline fix
+terminalizes dead interactive crews so they stop re-emitting false
+`CREW STALLED` alerts, plus per-crew worktree isolation and shell-injection-safe
+crew dispatch.
+
+### Added
+
+- **Per-crew git worktree isolation.** Crews can now run in their own git
+  worktree via `--worktree`, so concurrent crews no longer collide on a shared
+  working tree / HEAD. (#216, #218)
+- **opencode CP3 permission gate.** Interactive opencode crews can surface
+  `permission.asked` to the captain (opt-in), closing the last notify-and-answer
+  gap for opencode. (#215)
+- **Injection-safe crew dispatch.** `cockpit crew spawn`/`send` accept
+  `--task-file` / `--message-file` to pass briefs and messages by file,
+  bypassing shell metacharacter substitution and inline-brief truncation.
+  (#177, #205)
+
+### Fixed
+
+- **Dead interactive crews are now terminalized.** A three-part fix stops
+  orphaned interactive crews (no live pane, no heartbeat) from oscillating
+  `working ↔ stalled` and firing false `CREW STALLED` alerts forever:
+  `SessionEnd` now terminalizes a claude crew instead of resuming it to
+  `working`; `crew close` terminalizes the daemon task even when the pane is
+  already gone; and a surface-liveness backstop in the daemon's sweep/reconcile
+  reaps crews whose surface is provably gone. Liveness-based, so the 24h
+  interactive heartbeat budget (#131/#133) is preserved. (#139, #219)
+- **notify-relay no longer silently drops events.** The daemon↔relay formatter
+  is unified so the daemon is the single source of truth; `CREW IDLE` and
+  `task.approval.requested` events reach the captain instead of being discarded
+  on formatter drift. (#210, #214, #217)
+- **codex first-turn race.** The initial codex turn is no longer dropped
+  ("no thread for task") — first-turn `say()` is gated on the in-flight
+  dispatch. (#212, #213)
+- **Bounded crew read/tasks output.** `cockpit crew read`/`tasks` output is
+  bounded to prevent truncated results and `/compact` churn. (#206)
+
+### Docs
+
+- Corrected the crew-lifecycle checklist methodology (two signal mechanisms,
+  CP4 gap #210, 2026-06-03 findings). (#211)
+
 ## [0.5.0] - 2026-06-01
 
 This release closes the cross-agent **crew-lifecycle parity** goal: all three
