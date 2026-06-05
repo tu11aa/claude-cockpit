@@ -307,19 +307,26 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   const captainProbe = opts.captainProbe ?? createCaptainProbe();
   async function buildHealth(only?: string): Promise<ComponentHealth[]> {
     const config = loadConfig();
-    const names = only ? [only] : Object.keys(config.projects);
-    const now = Date.now();
     const relays = d.getRelayHealth();
+    const now = Date.now();
+    // Projects known from config ∪ relay registrations ∪ active tasks, so a
+    // registered-but-unconfigured relay (or a crew) still surfaces.
+    const known = new Set<string>([
+      ...Object.keys(config.projects),
+      ...relays.map((r) => r.project),
+      ...store.listAll().map((t) => t.project),
+    ]);
+    const names = only ? [only] : [...known];
     const out: ComponentHealth[] = [];
     for (const project of names) {
       const proj = config.projects[project];
-      if (!proj) continue;
-      const captainPresent = await captainProbe(project, proj.captainName);
+      const captainName = proj?.captainName ?? `${project}-captain`;
+      const captainPresent = await captainProbe(project, captainName);
       out.push(
         ...projectHealth({
           project,
           now,
-          captainName: proj.captainName,
+          captainName,
           relay: relays.find((r) => r.project === project) ?? null,
           captainPresent,
           commandPresent: null, // command is on-demand; not tracked in this cut
