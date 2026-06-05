@@ -136,6 +136,17 @@ Per the issue's own 2026-06-05 comment and the code:
 ## Explicitly deferred (follow-up issues, not gold-plated here)
 
 1. **cmux-tree-resident relay-keeper** — the genuine in-prod auto-heal (this PR's
-   daemon heal is best-effort + surfaced).
-2. #77's reactions.json escalation rules + hard crew task-timeout escalation.
-3. #64 hook/socket event ingestion into the liveness layer (event-ready, not event-blocked).
+   daemon heal is best-effort + surfaced). → filed as **#224**.
+2. #77's reactions.json escalation + hard crew task-timeout + #64 event
+   ingestion. → filed as **#225**.
+
+---
+
+## Status: APPROVED (2026-06-05) — built
+
+Captain approved all three scope decisions, priority refinement: **the
+non-negotiable core is "captain is never SILENTLY blind" (detect + surface).
+Best-effort heal is SECONDARY** and intentionally minimal — mostly inert under
+launchd (cmux lineage), so the liveness surface + the actionable
+"relay DOWN — run: cockpit launch &lt;project&gt;" message is the guarantee, not
+the heal. #208 verdict: `docs/decisions/2026-06-05-issue-208-verdict.md` → CLOSE.
