@@ -287,3 +287,63 @@ describe("keepalive framing (#94)", () => {
     expect(cleared).toContain(42);
   });
 });
+
+// ── Issue #87: malformed / newline-less input fast error ─────────────────────
+
+describe("socket input validation (#87)", () => {
+  let cleanup: (() => void) | undefined;
+  afterEach(() => { cleanup?.(); cleanup = undefined; });
+
+  it("server replies with structured error when client sends valid JSON without a trailing newline", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cp-nonl-"));
+    const sock = join(dir, "nonl.sock");
+    const server = startServer(sock, async () => "should-not-reach");
+    cleanup = () => { server.close(); rmSync(dir, { recursive: true, force: true }); };
+
+    const reply = await new Promise<any>((resolve, reject) => {
+      const conn = createConnection(sock);
+      conn.setEncoding("utf-8");
+      let buf = "";
+      conn.on("connect", () => {
+        // Write valid JSON with NO trailing newline, then half-close the write side.
+        conn.write('{"kind":"status","project":"p","id":"x"}');
+        conn.end();
+      });
+      conn.on("data", (chunk: string) => { buf += chunk; });
+      conn.on("close", () => {
+        try { resolve(JSON.parse(buf.split("\n")[0]!)); } catch { reject(new Error(`no parseable reply: ${buf}`)); }
+      });
+      conn.on("error", reject);
+    });
+
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toMatch(/newline/i);
+    expect(reply._v).toBe(PROTOCOL_VERSION);
+  });
+
+  it("server replies with structured error when client sends invalid JSON (malformed)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cp-badj-"));
+    const sock = join(dir, "badj.sock");
+    const server = startServer(sock, async () => "should-not-reach");
+    cleanup = () => { server.close(); rmSync(dir, { recursive: true, force: true }); };
+
+    const reply = await new Promise<any>((resolve, reject) => {
+      const conn = createConnection(sock);
+      conn.setEncoding("utf-8");
+      let buf = "";
+      conn.on("connect", () => {
+        conn.write("not-valid-json-at-all\n");
+      });
+      conn.on("data", (chunk: string) => {
+        buf += chunk;
+        if (buf.includes("\n")) { conn.destroy(); resolve(JSON.parse(buf.split("\n")[0]!)); }
+      });
+      setTimeout(() => reject(new Error("timeout — no reply received")), 1000);
+      conn.on("error", reject);
+    });
+
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toMatch(/malformed|invalid.*json/i);
+    expect(reply._v).toBe(PROTOCOL_VERSION);
+  });
+});

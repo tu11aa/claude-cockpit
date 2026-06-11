@@ -689,3 +689,36 @@ describe("sweep: task-timeout (#225)", () => {
     expect(timeoutCalls()).toBe(1);
   });
 });
+
+// ── Issue #87: socket-boundary schema validation ──────────────────────────────
+
+describe("daemon handle() socket-boundary validation (#87)", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "cp-val-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("handle() rejects completely unknown request kind with a clear structured error", async () => {
+    const store = createStore(dir);
+    const d = createDaemon({ store, now: () => 1000 });
+    await expect(
+      d.handle({ kind: "UNKNOWN_KIND_INJECTED_BY_ROGUE_CLIENT" } as any),
+    ).rejects.toThrow(/unknown.*kind|unhandled.*kind/i);
+  });
+
+  it("handle() rejects unknown event type with a clear validation error — NOT a store corruption (#87)", async () => {
+    const store = createStore(dir);
+    const task = rec("t-validate", { state: "working" });
+    store.put(task);
+    const d = createDaemon({ store, now: () => 2000 });
+    await expect(
+      d.handle({
+        kind: "event",
+        project: "p",
+        event: { type: "future.unknown.event.from.wire", id: "t-validate" } as any,
+      }),
+    ).rejects.toThrow(/unknown.*event.*type|event.*type.*unknown/i);
+    // The store record must be UNCHANGED — no corruption from reduce() returning undefined.
+    expect(store.get("p", "t-validate")?.state).toBe("working");
+  });
+});
+

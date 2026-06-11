@@ -11,7 +11,7 @@ export function encodeMsg(obj: unknown): string {
   return JSON.stringify(obj) + "\n";
 }
 
-export function createDecoder() {
+export function createDecoder(onParseError?: (line: string) => void) {
   let buf = "";
   return {
     push(chunk: string): unknown[] {
@@ -27,9 +27,19 @@ export function createDecoder() {
           // Silently discard keepalive frames (#94) — never surface to any consumer.
           if (typeof parsed === "object" && parsed !== null && (parsed as any).type === "_keepalive") continue;
           out.push(parsed);
-        } catch { /* skip malformed */ }
+        } catch {
+          // #87: notify caller of malformed lines so the server can reply with a
+          // structured error instead of silently dropping the frame.
+          onParseError?.(line);
+        }
       }
       return out;
+    },
+    // #87: exposes the unprocessed buffer content — bytes received but not yet
+    // terminated with a newline. The server checks this on connection end to
+    // detect newline-less input and reply with a fast structured error.
+    remainder(): string {
+      return buf;
     },
   };
 }
@@ -93,10 +103,19 @@ export function startServer(
     try { unlinkSync(sockPath); } catch { /* stale socket */ }
   }
   const server = createServer((conn) => {
-    const dec = createDecoder();
     conn.setEncoding("utf-8");
     let claimType: "none" | "attach" = "none";
     let keepaliveId: ReturnType<typeof setInterval> | undefined;
+
+    // #87: reply with a structured error when a newline-terminated line fails to
+    // parse as JSON, so the client gets a fast error instead of a silent drop.
+    const dec = createDecoder((badLine) => {
+      if (claimType !== "attach") {
+        try {
+          conn.write(encodeMsg({ ok: false, error: `malformed request: invalid JSON`, _v: PROTOCOL_VERSION }));
+        } catch { /* conn already closed */ }
+      }
+    });
 
     conn.on("data", async (chunk: string) => {
       for (const msg of dec.push(chunk)) {
@@ -132,6 +151,16 @@ export function startServer(
       }
     });
     conn.on("error", () => { /* client vanished; ignore */ });
+    // #87: when the client half-closes (done sending) with bytes still in the
+    // decoder buffer, the message had no newline terminator — send a fast error
+    // instead of silently leaving the client to hit the 5s sendRequest timeout.
+    conn.on("end", () => {
+      if (claimType !== "attach" && dec.remainder().trim()) {
+        try {
+          conn.write(encodeMsg({ ok: false, error: `malformed request: missing newline terminator`, _v: PROTOCOL_VERSION }));
+        } catch { /* conn already closed */ }
+      }
+    });
     conn.on("close", () => {
       if (keepaliveId !== undefined) clearIntervalFn(keepaliveId);
       if (claimType === "attach") onAttachClose?.(conn);
