@@ -168,6 +168,19 @@ type Req =
   | { kind: "reply"; project: string; id: string; message: string }
   | { kind: "gate-resolve"; project: string; gateId: string; resolvedBy: string; payload: unknown };
 
+// #87: exhaustive set of known ControlEvent types for socket-boundary validation.
+// Any event.type arriving from the wire that is not in this set is rejected with
+// a clean structured error before it can reach reduce() or the store.
+const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "task.started", "task.progress", "heartbeat",
+  "task.blocked", "task.done", "task.failed",
+  "task.session", "task.turn.started", "task.turn.completed",
+  "task.delta", "task.input.requested", "task.approval.requested",
+  "task.reattached", "task.reopened",
+  "task.stalled", "task.idle", "task.timeout", "task.reconcile-failed",
+  "task.cancelled", "task.session.ended",
+]);
+
 export function createDaemon(deps: DaemonDeps) {
   const { store, now } = deps;
   // #210: per-task timestamp of the captain's most recent turn (a `crew send`/
@@ -237,6 +250,10 @@ export function createDaemon(deps: DaemonDeps) {
           return failed;
         }
         case "event": {
+          // #87: validate event.type at the socket boundary before touching state.
+          if (!KNOWN_EVENT_TYPES.has((req.event as any).type)) {
+            throw new Error(`unknown event type '${(req.event as any).type}' — not a valid ControlEvent`);
+          }
           const cur = store.get(req.project, req.event.id);
           if (!cur) throw new Error(`unknown task ${req.event.id}`);
           // A captain turn (crew send/reply) arrives as task.started → record it
