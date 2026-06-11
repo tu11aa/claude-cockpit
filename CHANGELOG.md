@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-06-11
+
+A stability release headlined by the **RAM-flood fix** — orphaned headless `claude -p` sessions no longer accumulate until the machine runs out of memory. Also adds per-spawn `--model` override, captain-draft preservation in the inbox, a captain-managed relay with live `cockpit relay logs`, `PROTOCOL_VERSION` framing, `cockpit heal`, and project-management skills.
+
 ### Added
+
+- **`--model <alias>` flag for per-spawn crew model override.** `cockpit crew spawn --model <alias>` overrides `defaults.roles.crew.model` for a single spawn, taking precedence over runtime config — fixing model-drift when the stored config is stale. Closes #250. (#265)
+
+- **`cockpit-register-project` and `cockpit-new-project` skills.** Two agent-usable skills so captains can register an existing repo (resolve path, derive name, pick group, `cockpit projects add`, verify) or stand up a brand-new GitHub repo (`gh repo create` → clone → register) without hand-editing `config.json`. Both document the `--group-role` auto-primary gotcha. Closes #262. (#263)
+
+- **Captain-managed relay supervisor.** The captain now owns its notify-relay as a single `run_in_background` process running an in-process restart loop (3s backoff), replacing the separate `✉ notify-relay` cmux tab spawned by `cockpit launch` that could die unnoticed. Closes #240. (#242)
+
+- **`cockpit relay logs <project> [--follow]`.** On-demand live visibility into the captain-owned relay over a per-project unix socket — no persistent logfile (lines are broadcast to connected readers only and dropped when nobody is watching), and the relay core is untouched (wired via the existing `opts.log` injection point). Closes #244. (#247)
+
+- **Relay logs a `deliver` line on successful delivery.** The relay's happy path now logs each crew signal flowing through, so a healthy relay no longer looks idle in `cockpit relay logs` — previously it only logged on failure. (#244) (#248)
+
+- **Relay-as-cmux-proxy for crew-surface liveness.** Surface-liveness probes now run inside the captain's cmux lineage (where the relay lives) and post results back to the daemon, instead of the launchd daemon calling `cmux` directly — which always returned empty `"gone"` verdicts and ghost-reaped live crews. The pre-result default stays `"unknown"`, which never reaps. (#239 Phase B) (#257)
+
+- **Socket-boundary schema validation.** `daemon.handle()` validates `event.type` against the full `ControlEvent` union before touching state and fast-errors on malformed frames; the event reducer gained an exhaustive `default` so an unknown/future event type can never return `undefined`. Closes #87. (#256)
 
 - **Wire `PROTOCOL_VERSION` and keepalive framing.** `src/control/protocol.ts` now exports `PROTOCOL_VERSION = 1`. The client (`sendRequest`) stamps `_v` on every outgoing request; the server stamps `_v` on every reply. On a version mismatch the client rejects with a clear error (`cockpitd protocol vN, this client expects vM — upgrade cockpitd or this CLI`) instead of silently misparsing. An absent `_v` (pre-v1 daemon) is treated as compatible — no breakage on rolling restart. The bump policy is documented inline: bump for any wire-shape change. `startServer` also emits a `{"type":"_keepalive"}` frame every 10 s on held-open attach connections (crew-attach stream and future subscribe channels), using an injectable clock so tests drive the timer without real delays. `createDecoder` and `decodeFrames` silently discard keepalive frames at the shared decode layer, so no consumer ever sees them. Closes #92 and #94.
 
@@ -16,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hard crew task-timeout.** The daemon sweep now detects non-terminal tasks that exceed a per-task wall-clock ceiling (default 8h, configurable via `defaults.taskTimeoutMs`). When the ceiling is crossed the daemon fires a detect-only `CREW TIMEOUT` escalation to the captain via the existing mailbox → notify-relay pipe — the same path `CREW STALLED` / `CREW DONE` ride. No state change or kill (detection-first, per #77). Distinct from the heartbeat/stall budget, which only measures heartbeat freshness; a continuously-heartbeating crew stuck on one task for hours is now caught. Closes #225. (#225)
 
 ### Fixed
+
+- **RAM-flood root-causes — the freeze that filled swap and forced restarts.** Orphaned `claude -p` headless sessions were accumulating until the machine ran out of memory (seen at 13.5 GB swap on 24 GB, load avg 82). Three root causes fixed: **(#259)** the launchd-throttled (`KeepAlive`+`ThrottleInterval=10`) `cockpitd` crash-loop that re-dispatched headless tasks on every boot — a stray `src/control/cockpitd.js` launch path is guarded, socket-write failures no longer escape as fatals, and an `inFlightHeadlessIds` guard stops `reconcile()` from double-dispatching; **(#260)** the test suite shelling out to the real `claude` CLI when `startCockpitd` ran without a mocked spawn — a `launchHeadless` injection seam isolates tests; **(#261)** headless children orphaning to PPID 1 and surviving daemon death — `activeHeadlessKills` reaps them on `stop()`. Verified end-to-end: a live daemon on the fix ran with a single boot, 0 crash signatures, and 0 leaked sessions. (#264)
+
+- **Captain's in-progress draft is preserved on relay delivery.** Typing in the captain inbox while a crew reply arrived used to concatenate your draft into the delivered message and submit both. The relay now defers delivery while you have a real in-progress draft and delivers only when the input is empty (deliver-when-empty); a configurable walk-away fallback (`relay.maxDeferDeliveries`, default `300` ≈ 5 min at the ~1s poll) force-delivers a long-held draft via best-effort backspace clear-and-restore. `parseDraftFromScreen` is scoped to the live input box so transcript text never triggers a spurious defer or gets re-pasted. (#258 — #266, #267, #269)
 
 - **`cockpit shutdown` now terminalizes crew task records before closing workspaces.** Previously, closing a captain workspace left all its crew task records non-terminal in the daemon store (ghost records). On daemon restart the `#225` timeout sweep fired against every ghost simultaneously, flooding the captain with `CREW TIMEOUT` notifications. `cockpit shutdown [project]` now sends `task.cancelled` (reason: `captain shutdown`) for every non-terminal crew task before closing the workspace — the same terminalization `cockpit crew close` already performed. Daemon errors during terminalization are swallowed so a down daemon never blocks the workspace close. Closes ghost-source root cause of the `#225` timeout flood. (#225)
 
