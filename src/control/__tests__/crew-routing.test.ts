@@ -88,3 +88,14 @@ describe("resolveCrewRoute", () => {
     expect(result?.agent).toBe("opencode");
   });
 });
+
+// Regression: shipped default ruleset ordering (extreme → hard → mobile → daily)
+import { getDefaultConfig } from "../../config.js";
+
+describe("resolveCrewRoute — shipped default config ordering", () => {
+  it("'implement mobile feature' resolves to hard/claude/sonnet, not mobile/codex (hard rule precedes mobile in default ruleset)", () => {
+    const config = getDefaultConfig();
+    const result = resolveCrewRoute("implement mobile feature", config);
+    expect(result).toMatchObject({ tier: "hard", agent: "claude", model: "sonnet" });
+  });
+});
