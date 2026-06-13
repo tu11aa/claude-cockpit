@@ -271,6 +271,64 @@ describe("cockpit crew spawn", () => {
     expect(addWorktree).toHaveBeenCalledWith(expect.objectContaining({ worktreeDir: ".wt" }));
   });
 
+  it("--worktree claude crew: launch command starts with cd into worktree path", async () => {
+    loadConfig.mockReturnValue(baseConfig);
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("claude --append-system-prompt-file /tmp/crew.md");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-wtcd" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-wtcd", project: "brove", provider: "claude", mode: "interactive" });
+    const wtPath = "/tmp/brove/.worktrees/brove-crew-1";
+    addWorktree.mockReturnValue(wtPath);
+
+    const promise = runCrewSpawn({ project: "brove", task: "feature work", worktree: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    const launchCmd: string = sendToPane.mock.calls[0]?.[1];
+    // Shell must cd into the worktree before launching the agent (#279).
+    expect(launchCmd).toMatch(/^cd '\/tmp\/brove\/\.worktrees\/brove-crew-1' && /);
+  });
+
+  it("non-worktree claude crew: launch command starts with cd into main checkout (no-op harmless)", async () => {
+    loadConfig.mockReturnValue(baseConfig);
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("claude ...");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-nowt2" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-nowt2", project: "brove", provider: "claude", mode: "interactive" });
+
+    const promise = runCrewSpawn({ project: "brove", task: "small fix" });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    const launchCmd: string = sendToPane.mock.calls[0]?.[1];
+    // Non-worktree: cwd is proj.path — cd is a no-op but still issued for uniformity.
+    expect(launchCmd).toMatch(/^cd '\/tmp\/brove' && /);
+  });
+
+  it("--worktree opencode crew: launch command starts with cd into worktree path", async () => {
+    loadConfig.mockReturnValue(baseConfig);
+    status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
+    listSurfaces.mockResolvedValue([]);
+    newPane.mockResolvedValue({ workspaceId: "workspace:5", surfaceId: "surface:9" });
+    buildCommand.mockReturnValue("opencode");
+    buildDispatchRequest.mockImplementation((o) => ({ kind: "dispatch", record: { ...o, id: "task-ocwt" } }));
+    cockpitdCall.mockResolvedValue({ id: "task-ocwt", project: "brove", provider: "opencode", mode: "interactive" });
+    const wtPath = "/tmp/brove/.worktrees/brove-crew-1";
+    addWorktree.mockReturnValue(wtPath);
+
+    const promise = runCrewSpawn({ project: "brove", task: "feature work", worktree: true, agent: "opencode", agentExplicit: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    await promise;
+
+    const launchCmd: string = sendToPane.mock.calls[0]?.[1];
+    // Shell must cd into the worktree before launching opencode (#279).
+    expect(launchCmd).toMatch(/^cd '\/tmp\/brove\/\.worktrees\/brove-crew-1' && /);
+  });
+
   it("auto-names the next crew based on existing tabs (crew-1 + crew-3 → crew-2)", async () => {
     loadConfig.mockReturnValue(baseConfig);
     status.mockResolvedValue({ id: "workspace:5", name: "brove-captain", status: "running" });
