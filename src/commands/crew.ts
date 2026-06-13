@@ -221,6 +221,12 @@ export function buildCompletionProtocol(taskId: string, project: string): string
   ].join("\n");
 }
 
+// POSIX single-quote a path so it is safe to embed in a shell command even
+// when the path contains spaces or special characters.
+function shellQuote(p: string): string {
+  return "'" + p.replace(/'/g, "'\\''") + "'";
+}
+
 export interface CrewSpawnInput {
   project: string;
   task: string;
@@ -389,7 +395,7 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     // Prefix the CLI command with env so the hook bridge + signal verb
     // running inside the crew's cmux tab can identify their task.
     const envPrefix = `COCKPIT_CREW_TASK_ID=${rec.id} COCKPIT_CREW_PROJECT=${input.project}`;
-    await runtime.sendToPane(pane, `${envPrefix} ${cliCommand}`);
+    await runtime.sendToPane(pane, `cd ${shellQuote(spawnCwd)} && ${envPrefix} ${cliCommand}`);
     const preLaunchScreen = (await runtime.readPaneScreen(pane)) ?? "";
     await sendFirstTurnWhenReady(runtime, pane, `${input.task}\n\n${buildCompletionProtocol(rec.id, input.project)}`, preLaunchScreen);
     return { ...pane, title };
@@ -439,7 +445,7 @@ export async function runCrewSpawn(input: CrewSpawnInput): Promise<PaneRef> {
     const title = titleFor(input.project, name);
     const pane = await runtime.newPane({ workspaceId: captain.id, direction, title });
     const envPrefix = `COCKPIT_CREW_TASK_ID=${rec.id} COCKPIT_CREW_PROJECT=${input.project}`;
-    await runtime.sendToPane(pane, `${envPrefix} OPENCODE_CONFIG=${opencodeConfigPath} ${cliCommand}`);
+    await runtime.sendToPane(pane, `cd ${shellQuote(spawnCwd)} && ${envPrefix} OPENCODE_CONFIG=${opencodeConfigPath} ${cliCommand}`);
     const preLaunchScreen = (await runtime.readPaneScreen(pane)) ?? "";
     await sendFirstTurnWhenReady(runtime, pane, `${input.task}\n\n${buildCompletionProtocol(rec.id, input.project)}`, preLaunchScreen, {
       // #235: opencode's idle splash ("Ask anything…") keeps mutating (cursor
