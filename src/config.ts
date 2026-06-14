@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import chalk from "chalk";
 
 export interface ProjectConfig {
   path: string;
@@ -163,6 +164,18 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH): CockpitConfig {
     // Ensure agents has at least claude
     if (!config.agents) {
       config.agents = { claude: { cli: "claude", driver: "claude" } };
+    }
+
+    // #286: backfill crewRouting for configs written before routing existed
+    if (!config.defaults.crewRouting) {
+      config.defaults.crewRouting = getDefaultConfig().defaults.crewRouting;
+      saveConfig(config, configPath);
+      console.error(
+        chalk.cyan(
+          "⬆ cockpit upgrade: added default crew routing rules to your config (leveled routing now active). " +
+          "Edit defaults.crewRouting in ~/.config/cockpit/config.json or use the cockpit:add-pick-crew-rule skill.",
+        ),
+      );
     }
 
     return config;

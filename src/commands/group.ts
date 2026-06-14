@@ -138,7 +138,7 @@ export const groupCommand = new Command("group")
   .description("Cross-project intra-group operations (Phase 1: dispatch)")
   .addCommand(
     new Command("dispatch")
-      .description("Dispatch a task to a sibling project in the same group")
+      .description("[experimental] Dispatch a task to a sibling project in the same group")
       .argument("<to-project>", "Target project name (must be in the same group)")
       .argument("<task>", "Task description to dispatch")
       .option("--provider <p>", "claude|opencode|codex", "claude")
@@ -149,6 +149,8 @@ export const groupCommand = new Command("group")
           console.error(chalk.red("Could not determine current project from cwd. Run from inside a registered project directory."));
           process.exit(1);
         }
+
+        console.error(chalk.yellow("⚠ cross-project delegation is experimental (#288): boot-if-down of a down sibling may not yet produce an operational captain."));
 
         try {
           const result = await runGroupDispatch({
