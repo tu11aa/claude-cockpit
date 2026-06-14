@@ -138,7 +138,7 @@ describe("runHeadless", () => {
 
   it("caps stdout buffer at 4 MB: oversized output is trimmed to the tail", async () => {
     const child = fakeChild();
-    const writeResult = vi.fn(() => "/tmp/r.txt");
+    const writeResult = vi.fn((_id: string, _payload: string) => "/tmp/r.txt");
     const { result } = runHeadless({
       provider: "claude", task: "x", id: "t-cap",
       spawn: (() => child) as any, emit: () => {},
@@ -150,7 +150,7 @@ describe("runHeadless", () => {
     child.emit("close", 0);
     await result;
     // payload passed to writeResult must be ≤ 4 MB cap
-    const captured = writeResult.mock.calls[0]?.[1] as string;
+    const captured = writeResult.mock.calls[0]![1];
     expect(captured.length).toBeLessThanOrEqual(4 * MB);
     expect(captured.length).toBeGreaterThan(0);
   });
