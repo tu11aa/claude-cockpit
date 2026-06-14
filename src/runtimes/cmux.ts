@@ -134,8 +134,19 @@ export function parseDraftFromScreen(screen: string): string | null {
       if (plainMatch) extracted = plainMatch[1].trim();
     }
     if (extracted !== undefined) {
+      // Leading cursor glyph (▌/█ at position 0): cursor is at the start of the input,
+      // meaning nothing has been typed. Any text that follows is a ghost suggestion
+      // rendered by CC at the cursor position (#294). Treat the entire line as empty.
+      if (/^[▌█▔▎▏▌█]/.test(extracted)) continue;
+
       // Strip terminal cursor glyphs (▌, █, etc.) that trail the caret position
       const draft = extracted.replace(/\s*[▌█▔▎▏▌█]+\s*$/, "").trim();
+
+      // Claude Code UI placeholder: appears in Working state when input is locked
+      // (user cannot type). "Press [key] to [action]" strings are UI instructions
+      // shown as ghost suggestions — never real user-typed content (#294).
+      if (/^Press\s+(?:up|down|left|right|enter|escape|esc|tab|any\s+key|ctrl|shift|alt)\s+to\s+/i.test(draft)) continue;
+
       if (draft) return draft;
     }
   }
