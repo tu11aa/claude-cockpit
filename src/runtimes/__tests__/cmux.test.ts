@@ -744,6 +744,50 @@ describe("parseDraftFromScreen", () => {
     );
     expect(parseDraftFromScreen(fixture)).toBeNull();
   });
+
+  // #294: Claude Code ghost-suggestion placeholder must be treated as empty.
+  // "Press up to edit queued messages" is a CC UI hint, NOT user-typed content.
+  // Captured from a live captain in Working state: ❯ + U+00A0 NBSP + ghost text, no cursor block.
+  it("returns '' for CC ghost 'Press up to edit queued messages' (Working state, no cursor — #294)", () => {
+    // U+276F ❯, U+00A0 NBSP, then the placeholder text CC shows when there are queued messages
+    const screen = makeTestScreen("❯\xa0Press up to edit queued messages");
+    expect(parseDraftFromScreen(screen)).toBe("");
+  });
+
+  // #294: idle-state variant — cursor block appears at position 0 BEFORE the ghost text.
+  // Leading ▌ means cursor is at the start, so nothing has actually been typed.
+  it("returns '' when cursor block precedes ghost text in idle state (leading cursor = empty — #294)", () => {
+    const screen = makeTestScreen("❯\xa0▌Press up to edit queued messages");
+    expect(parseDraftFromScreen(screen)).toBe("");
+  });
+
+  // Regression guard (#258): real typed draft must still return its text after #294 fix.
+  it("still returns real draft text after #294 fix (regression guard for #258)", () => {
+    const screen = makeTestScreen("❯\xa0hello world");
+    expect(parseDraftFromScreen(screen)).toBe("hello world");
+  });
+
+  // Captain follow-up on #297: if user types "hello world" then presses Ctrl-A/Home to move
+  // the cursor to the start, does cmux read-screen render "❯\xa0▌hello world" (leading ▌)?
+  // Verified: CC uses native ANSI cursor positioning, NOT a ▌ glyph — cursor-at-position-0
+  // on an idle CC session captures as ❯\xa0 (0xe2 0x9d 0xaf 0xc2 0xa0, no 0xe2 0x96 0x8c).
+  // cmux read-screen output is ❯\xa0hello world regardless of cursor position.
+  // Heuristic #1 (/^[▌█]/ skip) is therefore unreachable for real typed drafts — no clobber.
+  it("returns real draft when cursor is at start of typed text (no leading ▌ in CC output — #297)", () => {
+    // This is exactly what cmux read-screen yields after: type "hello world", press Ctrl-A.
+    const screen = makeTestScreen("❯\xa0hello world");
+    expect(parseDraftFromScreen(screen)).toBe("hello world");
+  });
+
+  // Regression fixture: real ghost screen captured from live captain during #294.
+  // Input box between HR boundaries contains ❯\xa0<ghost> — must return "".
+  it("returns '' for real ghost-placeholder fixture (regression #294)", () => {
+    const fixture = readFileSync(
+      join(process.cwd(), "docs/reports/294-ghost-placeholder-fixture.txt"),
+      "utf-8",
+    );
+    expect(parseDraftFromScreen(fixture)).toBe("");
+  });
 });
 
 describe("sanitizeForCmuxSend", () => {
@@ -859,6 +903,22 @@ describe("sendToSurface Approach B (#258 deliver-when-empty)", () => {
     // Must not have sent anything into the overlay
     const cmds = execFileMock.mock.calls.map(cmdOf);
     expect(cmds.filter((c) => c.startsWith("send ") && !c.startsWith("send-key"))).toHaveLength(0);
+  });
+
+  // #294: ghost placeholder must NOT trigger DeferDelivery — deliver immediately.
+  it("delivers immediately when input shows CC ghost placeholder (no DeferDelivery — #294)", async () => {
+    execFileMock.mockImplementation((_bin: string, args: string[]) => {
+      if (args.includes("read-screen")) return makeTestScreen("❯\xa0Press up to edit queued messages");
+      return "";
+    });
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done"),
+    ).resolves.toBeUndefined();
+    const calls = execFileMock.mock.calls.map(argvOf);
+    const msgIdx = calls.findIndex((a) => a[0] === "send" && a.includes("crew done"));
+    expect(msgIdx, "message was delivered").toBeGreaterThanOrEqual(0);
+    // No backspaces — ghost is not real content
+    expect(calls.every((a) => !a.includes("backspace"))).toBe(true);
   });
 
   it("non-empty draft + force=true → backspace clear, deliver, restore without Enter", async () => {

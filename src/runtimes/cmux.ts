@@ -134,8 +134,23 @@ export function parseDraftFromScreen(screen: string): string | null {
       if (plainMatch) extracted = plainMatch[1].trim();
     }
     if (extracted !== undefined) {
+      // Heuristic #1 — Leading cursor glyph (▌/█) at position 0.
+      // CC renders its input cursor via native ANSI terminal positioning, NOT as a ▌ cell
+      // character: a live cmux read-screen of an idle CC session with cursor at position 0
+      // yields ❯\xa0 with no ▌ (confirmed by 258-parse-bug-fixture.txt L24 and a fresh
+      // crew session capture). Therefore ▌ at the start cannot arise from the user moving
+      // the cursor to the beginning of real typed text — it only appears when CC itself
+      // renders a UI placeholder at that position (#294). Safe to treat as empty. (#297)
+      if (/^[▌█▔▎▏▌█]/.test(extracted)) continue;
+
       // Strip terminal cursor glyphs (▌, █, etc.) that trail the caret position
       const draft = extracted.replace(/\s*[▌█▔▎▏▌█]+\s*$/, "").trim();
+
+      // Claude Code UI placeholder: appears in Working state when input is locked
+      // (user cannot type). "Press [key] to [action]" strings are UI instructions
+      // shown as ghost suggestions — never real user-typed content (#294).
+      if (/^Press\s+(?:up|down|left|right|enter|escape|esc|tab|any\s+key|ctrl|shift|alt)\s+to\s+/i.test(draft)) continue;
+
       if (draft) return draft;
     }
   }
