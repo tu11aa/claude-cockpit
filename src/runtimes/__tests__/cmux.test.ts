@@ -584,40 +584,83 @@ describe("sendToSurface draft-preservation", () => {
     expect(sends[0]).toContain("crew is done");
   });
 
-  it("saves draft, clears input via backspaces, delivers, then restores draft without submitting (force=true)", async () => {
-    // "hello this is my draft" = 22 chars → 24 backspaces (draft.length + 2 margin)
-    const DRAFT = "hello this is my draft";
+  // #302 — the old destructive force path (backspace×N clear + re-paste the
+  // screen-read draft) is replaced by a non-destructive BUFFER-LIVENESS PROBE.
+  // Verified live (CC 2.1.x): a real draft is the ONLY thing that yields the
+  // "last char removed, still non-empty" signature under ONE backspace; a ghost
+  // either stays invariant or dismisses to empty. So the probe protects ONLY a
+  // real draft and NEVER re-pastes screen-read content (the materialization vector).
+  //
+  // Stateful mock of CC's input box: `box` is the content rendered between the
+  // HRs; one backspace transforms it per `onBackspace`; read-screen renders the
+  // current box. This lets a probe observe a DIFFERENT screen before vs after.
+  function probeMock(initial: string, onBackspace: (s: string) => string) {
+    let box = initial;
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      if (args.includes("read-screen")) {
-        return makeTestScreen(`│ > ${DRAFT}  │`, "│ Some conversation history │");
-      }
+      if (args.includes("read-screen")) return makeTestScreen(`❯ ${box}`);
+      if (args.includes("send-key") && args.includes("backspace")) { box = onBackspace(box); return ""; }
       return "";
     });
-    await driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { force: true });
+  }
+
+  it("probe: real draft (last-char-removal signature) → restores the one removed char and defers; never re-pastes the draft, never delivers", async () => {
+    const DRAFT = "hello world";
+    probeMock(DRAFT, (s) => s.slice(0, -1)); // real draft: backspace removes exactly the last char
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true }),
+    ).rejects.toBeInstanceOf(DeferDelivery);
     const calls = execFileMock.mock.calls.map(argvOf);
+    // Exactly ONE backspace — the probe, NOT a backspace×N clear
+    expect(calls.filter((a) => a.includes("send-key") && a.includes("backspace"))).toHaveLength(1);
+    // Crew message must NEVER be delivered (we deferred to protect the draft)
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(false);
+    // The full draft must NEVER be re-pasted (this was the #302 materialization vector)
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes(DRAFT)))).toBe(false);
+    // Only the single removed char ("d") is restored
+    const sends = calls.filter((a) => a[0] === "send");
+    expect(sends).toHaveLength(1);
+    expect(sends[0][sends[0].length - 1]).toBe("d");
+  });
 
-    // No ctrl-u: that key is a no-op against Claude Code's input box
-    expect(calls.every((a) => !a.includes("ctrl-u"))).toBe(true);
+  it("probe: ghost that DISMISSES to empty under backspace → delivers message+Enter, NEVER re-sends the ghost text (#302 materialization regression)", async () => {
+    const GHOST = "wait for both crews to finish";
+    probeMock(GHOST, () => ""); // verified live: the #294 queue ghost dismisses to empty
+    await driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true });
+    const calls = execFileMock.mock.calls.map(argvOf);
+    // The ghost text is NEVER typed back into the box
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("wait for both crews")))).toBe(false);
+    // The crew message IS delivered and submitted
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(true);
+    expect(calls.some((a) => a.includes("send-key") && a.includes("Enter"))).toBe(true);
+  });
 
-    // Backspaces must precede the message send
-    const msgSendIdx = calls.findIndex((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")));
-    const backspacesBefore = calls.slice(0, msgSendIdx).filter((a) => a.includes("send-key") && a.includes("backspace")).length;
-    expect(backspacesBefore, "backspace count = draft.length + 2").toBe(DRAFT.length + 2);
+  it("probe: ghost INVARIANT under backspace (stays identical) → delivers, never re-sends the ghost", async () => {
+    const GHOST = "some persistent suggestion";
+    probeMock(GHOST, (s) => s); // invariant: backspace is a no-op on non-buffer ghost
+    await driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true });
+    const calls = execFileMock.mock.calls.map(argvOf);
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("persistent suggestion")))).toBe(false);
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(true);
+  });
 
-    const enterIdx = calls.findIndex((a, i) => i > msgSendIdx && a.includes("send-key") && a.includes("Enter"));
-    // findLastIndex is ES2023; reverse-scan manually to stay within repo's tsconfig target
-    let restoreIdx = -1;
-    for (let i = calls.length - 1; i >= 0; i--) {
-      const a: string[] = calls[i];
-      if (a[0] === "send" && a.some((s: string) => s.includes(DRAFT))) { restoreIdx = i; break; }
-    }
-    expect(msgSendIdx).toBeGreaterThanOrEqual(0);
-    expect(enterIdx, "Enter after message").toBeGreaterThan(msgSendIdx);
-    // Restore send comes after Enter (draft goes back without submitting)
-    expect(restoreIdx, "restore after Enter").toBeGreaterThan(enterIdx);
-    // Restore must NOT be followed by another Enter
-    const cmdsAfterRestore = execFileMock.mock.calls.slice(restoreIdx + 1).map(cmdOf);
-    expect(cmdsAfterRestore.every((c) => !c.includes("Enter"))).toBe(true);
+  it("non-probe call with a draft present defers WITHOUT any keystroke (hot path unchanged — never races typing)", async () => {
+    probeMock("typing in progress", (s) => s.slice(0, -1));
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done"),
+    ).rejects.toBeInstanceOf(DeferDelivery);
+    const calls = execFileMock.mock.calls.map(argvOf);
+    expect(calls.some((a) => a.includes("backspace"))).toBe(false);
+    expect(calls.some((a) => a[0] === "send")).toBe(false);
+  });
+
+  it("DeferDelivery carries the observed draft text so the relay can track content stability", async () => {
+    probeMock("my draft text", (s) => s.slice(0, -1));
+    let caught: unknown;
+    try {
+      await driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done");
+    } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(DeferDelivery);
+    expect((caught as DeferDelivery).draft).toBe("my draft text");
   });
 
   // #268: unreadable screen → draft stays null → DeferDelivery (never deliver into unknown state).
@@ -921,31 +964,26 @@ describe("sendToSurface Approach B (#258 deliver-when-empty)", () => {
     expect(calls.every((a) => !a.includes("backspace"))).toBe(true);
   });
 
-  it("non-empty draft + force=true → backspace clear, deliver, restore without Enter", async () => {
+  // #302: a real walk-away draft under {probe:true} is detected by the
+  // last-char-removal signature → restore + defer; it is NEVER force-delivered
+  // (the old backspace×N clear + re-paste, which materialized ghosts, is gone).
+  it("real walk-away draft + probe=true → one backspace, restore one char, defers (never force-clobbers)", async () => {
     const DRAFT = "my walk-away draft";
+    let box = DRAFT;
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      if (args.includes("read-screen")) return makeTestScreen(`❯ ${DRAFT}`);
+      if (args.includes("read-screen")) return makeTestScreen(`❯ ${box}`);
+      if (args.includes("send-key") && args.includes("backspace")) { box = box.slice(0, -1); return ""; }
       return "";
     });
-    await driver.sendToSurface(
-      { workspaceId: "workspace:3", surfaceId: "surface:8" },
-      "crew done",
-      { force: true },
-    );
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true }),
+    ).rejects.toBeInstanceOf(DeferDelivery);
     const calls = execFileMock.mock.calls.map(argvOf);
-    const msgIdx = calls.findIndex((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")));
-    const backspacesBefore = calls.slice(0, msgIdx).filter((a) => a.includes("send-key") && a.includes("backspace")).length;
-    expect(backspacesBefore, "backspace count = draft.length + 2").toBe(DRAFT.length + 2);
-    const enterIdx = calls.findIndex((a, i) => i > msgIdx && a.includes("send-key") && a.includes("Enter"));
-    let restoreIdx = -1;
-    for (let i = calls.length - 1; i >= 0; i--) {
-      const a: string[] = calls[i];
-      if (a[0] === "send" && a.some((s: string) => s.includes(DRAFT))) { restoreIdx = i; break; }
-    }
-    expect(enterIdx, "Enter after message").toBeGreaterThan(msgIdx);
-    expect(restoreIdx, "restore after Enter").toBeGreaterThan(enterIdx);
-    // Restore must NOT be followed by another Enter
-    const afterRestore = execFileMock.mock.calls.slice(restoreIdx + 1).map(cmdOf);
-    expect(afterRestore.every((c) => !c.includes("Enter"))).toBe(true);
+    // Exactly ONE backspace (the probe), not draft.length+2
+    expect(calls.filter((a) => a.includes("send-key") && a.includes("backspace"))).toHaveLength(1);
+    // Message NOT delivered, full draft NEVER re-pasted, no Enter submitted
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(false);
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes(DRAFT)))).toBe(false);
+    expect(calls.some((a) => a.includes("send-key") && a.includes("Enter"))).toBe(false);
   });
 });

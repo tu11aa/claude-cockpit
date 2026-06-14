@@ -1,7 +1,69 @@
 # Issue #302 — Non-destructive, ghost-immune relay delivery (PHASE 1 proposal)
 
-**Status:** Awaiting captain approval. No code written yet.
+**Status:** IMPLEMENTED. Build + full suite green; live end-to-end verified.
 **Branch (Phase 2):** `fix/302-nondestructive-delivery` off `develop`.
+
+---
+
+## Phase 2 results (implemented)
+
+**Change (surgical):**
+- `cmux.ts` — `DeferDelivery` now carries the observed `draft`; `sendToSurface`'s
+  destructive `force` branch (backspace×N clear + **re-paste of screen-read draft**)
+  is **deleted** and replaced by the buffer-liveness **probe** (`{ probe: true }`);
+  added `readInputBoxRaw` (full multi-line box capture for the before/after diff).
+- `notify-relay.ts` — tracks per-seq content stability; triggers the probe once
+  content is byte-stable for `stableProbePolls` (default 3 ≈ 3s) **or** the
+  300-defer backstop; `force`→`probe`. New `DEFAULT_STABLE_PROBE_POLLS`.
+- `types.ts` / `config.ts` — `sendToSurface` opt `force`→`probe`; new
+  `relay.stableProbePolls` config key.
+
+**Probe rule:** read box; send ONE backspace; re-read. If `after === before.slice(0,-1)`
+and non-empty → **real draft** → restore the one removed char, defer (never clobber,
+never re-paste the full draft). Else (ghost dismissed/invariant, or now empty) → deliver.
+
+**Stability/stall fix (reconciliation with the race that killed backspace in #258):**
+the probe is *inherently race-safe* — its only delivering branch is "no real draft,"
+and an actively-typing captain always presents a real draft → the probe hits the
+restore-and-defer branch (a brief 1-char flicker at worst), never a clobber. The
+stability gate additionally avoids even that flicker by only probing when content is
+stable. So the 300-defer backstop is kept but is now harmless (it can no longer
+clobber). **Worst-case failure mode is a stall, never materialization.**
+
+**Verification:**
+- `npm run build` (tsc) clean; `vitest run` full suite **1078/1078 green** (new: 6
+  cmux probe tests + 1 reworked walk-away test + 3 relay stability tests).
+- **STEP 0 live** (gate): backspace is buffer-aware — empty box invariant, real draft
+  loses last char, #294 queue-ghost dismisses to empty.
+- **Live end-to-end** against a real CC 2.1.x box via the *compiled* driver: real
+  draft → DEFERRED (draft intact); empty → DELIVERED; ghost → DELIVERED with buffer
+  confirmed empty (typing a char replaced the placeholder — **ghost not materialized**).
+  Throwaway sessions torn down, no orphaned `claude`.
+
+**Not run here (captain deploy-time):** the full crew-lifecycle checklist against
+*live deployed* crews requires the globally-installed relay to be rebuilt from this
+branch. Relevant checkpoints to re-confirm post-deploy: #258 preserve-draft, #268
+overlay/null defer, #294 ghost fast-path, and the new #302 stall-free ghost delivery.
+
+---
+
+## STEP 0 — live verification (DONE, gate PASSED)
+
+Bounded throwaway `claude --permission-mode plan` in a temp git dir, driven via `cmux
+send-key`/`read-screen`, torn down clean (no orphaned `claude`). CC 2.1.x.
+
+| Case | Before backspace | After ONE backspace | Signature |
+|------|------------------|---------------------|-----------|
+| Empty buffer | `❯ \xa0` | `❯ \xa0` (identical) | **invariant** |
+| Real draft | `hello world` | `hello worl` | **clean last-char removal** |
+| Real ghost (#294 queue placeholder) | `Press up to edit queued messages` | `❯ ` (empty); buffer confirmed empty — typing `X`→`X`, not appended | **dismissed to empty** |
+
+**Refined rule (stronger than the original Case-A assumption):** a real draft is the ONLY thing
+that yields the "last char removed, still non-empty" signature. Every ghost either stays invariant
+or dismisses to empty — never that signature. So **protect only on the positive real-draft
+signature; otherwise the buffer holds no preservable draft → deliver.** Even an exotic ghost misread
+as real degrades to *defer* (we re-type only the one char we removed, then defer) — **never
+materialization, never submission.** #302's headline harm is structurally impossible.
 
 ---
 
