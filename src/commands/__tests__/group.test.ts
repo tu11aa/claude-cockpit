@@ -17,7 +17,7 @@ vi.mock("../../config.js", () => ({
   resolveHome: (p: string) => p,
 }));
 
-import { runGroupDispatch } from "../group.js";
+import { runGroupDispatch, groupCommand } from "../group.js";
 
 const makeConfig = (overrides: Record<string, any> = {}) => {
   const projects: Record<string, any> = {
@@ -61,6 +61,14 @@ const makeConfig = (overrides: Record<string, any> = {}) => {
     metrics: { enabled: false, path: "/tmp/metrics.json" },
   };
 };
+
+describe("groupCommand dispatch description", () => {
+  it("marks dispatch as [experimental]", () => {
+    const dispatch = groupCommand.commands.find((c) => c.name() === "dispatch");
+    expect(dispatch).toBeDefined();
+    expect(dispatch!.description()).toMatch(/\[experimental\]/i);
+  });
+});
 
 describe("runGroupDispatch", () => {
   beforeEach(() => {
