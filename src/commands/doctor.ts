@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "../config.js";
+import { compatManifest } from "../lib/compat-manifest.js";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
 import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 import { createCmuxNotifier, NotifierRegistry } from "../notifiers/index.js";
@@ -31,11 +32,12 @@ function claudeVersionOk(): boolean {
     const version = execSync("claude --version", { encoding: "utf-8" }).trim();
     const match = version.match(/(\d+)\.(\d+)\.(\d+)/);
     if (!match) return false;
-    const [, major, minor, patch] = match.map(Number);
+    const [major, minor, patch] = match.slice(1).map(Number);
+    const [minMajor, minMinor, minPatch] = compatManifest.tools.claude.min.split(".").map(Number);
     return (
-      major > 2 ||
-      (major === 2 && minor > 1) ||
-      (major === 2 && minor === 1 && patch >= 32)
+      major > minMajor ||
+      (major === minMajor && minor > minMinor) ||
+      (major === minMajor && minor === minMinor && patch >= minPatch)
     );
   } catch {
     return false;
@@ -89,7 +91,7 @@ export const doctorCommand = new Command("doctor")
     const results: boolean[] = [];
 
     results.push(check("Claude Code installed", commandExists("claude")));
-    results.push(check("Claude Code version >= 2.1.32", claudeVersionOk()));
+    results.push(check(`Claude Code version >= ${compatManifest.tools.claude.min}`, claudeVersionOk()));
     results.push(check("Obsidian installed", commandExists("obsidian") || fs.existsSync("/Applications/Obsidian.app")));
     results.push(check("Node.js >= 18", nodeVersionOk()));
     results.push(
