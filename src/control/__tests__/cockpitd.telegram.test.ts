@@ -16,7 +16,7 @@ describe("cockpitd telegram wiring", () => {
     const { stateRoot, sockPath } = tmpRoots();
     const pushLifecycle = vi.fn(async () => { throw new Error("tg down"); });
     const telegram: TelegramSubsystem = { pushLifecycle, startInbound: vi.fn(), stop: vi.fn() };
-    const notify = vi.fn(async () => {});
+    const notify = vi.fn(async (_args: unknown) => {});
 
     const h = startCockpitd({ stateRoot, sockPath, sweepMs: 0, rotationIntervalMs: 0, notify, telegram });
     expect(telegram.startInbound).toHaveBeenCalled();
