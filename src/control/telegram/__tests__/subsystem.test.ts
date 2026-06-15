@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTelegramSubsystem, processInboundUpdate } from "../subsystem.js";
+import { loadTelegramState } from "../state.js";
 import type { TelegramClient } from "../client.js";
 import type { TaskRecord } from "../../types.js";
 
@@ -67,6 +68,18 @@ describe("telegram subsystem — outbound", () => {
     expect(client.closeForumTopic).toHaveBeenCalledWith(-100, 42);
   });
 
+  it("concurrent pushLifecycle for the same new task calls createForumTopic only once", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tg-"));
+    const client = fakeClient();
+    const sub = await createTelegramSubsystem(baseDeps(client, root));
+    await Promise.all([
+      sub.pushLifecycle({ project: "cockpit", message: "a", record: rec() }),
+      sub.pushLifecycle({ project: "cockpit", message: "b", record: rec() }),
+    ]);
+    expect(client.createForumTopic).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("never throws when the client fails (best-effort)", async () => {
     const root = mkdtempSync(join(tmpdir(), "tg-"));
     const client = fakeClient({ sendMessage: vi.fn(async () => { throw new Error("network down"); }) });
@@ -80,7 +93,7 @@ describe("telegram subsystem — inbound routing (pure)", () => {
 
   it("routes a crew-topic reply to that crew's captain via appendCaptainMessage", async () => {
     const append = vi.fn(async () => 1);
-    const findTask = (thread: number) => (thread === 42 ? { project: "cockpit", taskId: "t1" } : undefined);
+    const findTask = (_project: string, thread: number) => (thread === 42 ? { project: "cockpit", taskId: "t1" } : undefined);
     const handled = await processInboundUpdate({
       update: { update_id: 5, message: { chat: { id: -100, type: "supergroup" }, message_thread_id: 42, text: "use lucia" } },
       chats, findTask, resolveCrewName: () => "crew-2",
@@ -109,6 +122,27 @@ describe("telegram subsystem — inbound routing (pure)", () => {
     });
     expect(handled).toBe(false);
     expect(append).not.toHaveBeenCalled();
+  });
+
+  it("inbound loop advances offset past a poisoned update whose appendCaptainMessage throws", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tg-"));
+    const poison = { update_id: 5, message: { chat: { id: -100, type: "supergroup" }, text: "hi" } };
+    const getUpdates = vi.fn()
+      .mockResolvedValueOnce([poison])
+      // Slow subsequent polls to prevent tight looping; test completes before this resolves.
+      .mockImplementation(() => new Promise<[]>((r) => setTimeout(() => r([]), 5000)));
+    const appendCaptainMessage = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox locked"))
+      .mockResolvedValue(1);
+    const client = fakeClient({ getUpdates });
+    const sub = await createTelegramSubsystem({ ...baseDeps(client, root), appendCaptainMessage });
+    sub.startInbound();
+    // Let the loop process one batch (first getUpdates returns [poison])
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    sub.stop();
+    // Offset must have advanced to 6 (poison_id+1) despite the throw
+    const state = await loadTelegramState(root);
+    expect(state.offset()).toBe(6);
   });
 
   it("ignores updates with no text (e.g. join events)", async () => {

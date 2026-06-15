@@ -110,6 +110,12 @@ captain.
 
 Check status any time with `cockpit telegram status`.
 
+> **Security:** Every member of a linked supergroup can send messages to your
+> captain, which runs under `--permission-mode auto`. Keep your project group
+> **private** and restricted to trusted people. If the group is compromised,
+> anyone who joins gains remote-control access. An optional per-user allowlist
+> is tracked in [#321](https://github.com/tu11aa/claude-cockpit/issues/321).
+
 ### How it works
 
 - **Outbound** rides the daemon's existing notification fan-out — Telegram is a

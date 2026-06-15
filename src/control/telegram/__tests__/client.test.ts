@@ -1,6 +1,6 @@
 // src/control/telegram/__tests__/client.test.ts
 import { describe, it, expect, vi } from "vitest";
-import { createTelegramClient } from "../client.js";
+import { createTelegramClient, redactToken } from "../client.js";
 
 function fakeFetch(responses: Record<string, unknown>) {
   return vi.fn(async (url: string, init?: { body?: string }) => {
@@ -50,6 +50,15 @@ describe("telegram client", () => {
     expect(got).toEqual(updates);
     const body = JSON.parse((f.mock.calls[0][1] as { body: string }).body);
     expect(body).toEqual({ offset: 5, timeout: 0 });
+  });
+
+  it("redactToken replaces bot token occurrences with ***", () => {
+    const token = "123456:ABC-secret";
+    expect(redactToken(token, `https://api.telegram.org/bot${token}/sendMessage`))
+      .toBe("https://api.telegram.org/bot***/sendMessage");
+    expect(redactToken(token, `cause: fetch ${token} failed`))
+      .toBe("cause: fetch *** failed");
+    expect(redactToken(token, "no token here")).toBe("no token here");
   });
 
   it("throws on a Telegram error response", async () => {

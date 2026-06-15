@@ -12,7 +12,7 @@ export interface TelegramState {
   setOffset(n: number): Promise<void>;
   getTopic(project: string, taskId: string): number | undefined;
   setTopic(project: string, taskId: string, threadId: number): Promise<void>;
-  findTask(threadId: number): { project: string; taskId: string } | undefined;
+  findTask(project: string, threadId: number): { project: string; taskId: string } | undefined;
 }
 
 function statePath(stateRoot: string): string {
@@ -51,11 +51,11 @@ export async function loadTelegramState(stateRoot: string): Promise<TelegramStat
       data.topics[key(project, taskId)] = threadId;
       await persist();
     },
-    findTask(threadId) {
+    findTask(project, threadId) {
+      const prefix = `${project}::`;
       for (const [k, v] of Object.entries(data.topics)) {
-        if (v === threadId) {
-          const sep = k.indexOf("::");
-          return { project: k.slice(0, sep), taskId: k.slice(sep + 2) };
+        if (v === threadId && k.startsWith(prefix)) {
+          return { project, taskId: k.slice(prefix.length) };
         }
       }
       return undefined;

@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startCockpitd } from "../cockpitd.js";
+import { sendRequest } from "../protocol.js";
 import type { TelegramSubsystem } from "../telegram/subsystem.js";
 
 function tmpRoots() {
@@ -11,21 +12,39 @@ function tmpRoots() {
   return { stateRoot: join(root, "state"), sockPath: join(root, "d.sock") };
 }
 
-describe("cockpitd telegram wiring", () => {
-  it("starts inbound on boot and stops on teardown; composed notify swallows pushLifecycle throws", async () => {
-    const { stateRoot, sockPath } = tmpRoots();
-    const pushLifecycle = vi.fn(async () => { throw new Error("tg down"); });
-    const telegram: TelegramSubsystem = { pushLifecycle, startInbound: vi.fn(), stop: vi.fn() };
-    const notify = vi.fn(async (_args: unknown) => {});
+const SEED_RECORD = {
+  id: "t1", project: "cockpit", provider: "claude", mode: "interactive",
+  state: "submitted", task: "x", createdAt: 1, lastHeartbeat: 1,
+  lastEvent: "", heartbeatBudgetMs: 1000,
+  attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }],
+} as const;
 
-    const h = startCockpitd({ stateRoot, sockPath, sweepMs: 0, rotationIntervalMs: 0, notify, telegram });
+describe("cockpitd telegram wiring", () => {
+  it("starts inbound on boot; crash-contained: throwing pushLifecycle never crashes the daemon", async () => {
+    const { stateRoot, sockPath } = tmpRoots();
+    const pushLifecycle = vi.fn(async () => { throw new Error("tg network down"); });
+    const telegram: TelegramSubsystem = { pushLifecycle, startInbound: vi.fn(), stop: vi.fn() };
+
+    const h = startCockpitd({ stateRoot, sockPath, sweepMs: 0, rotationIntervalMs: 0, telegram });
     expect(telegram.startInbound).toHaveBeenCalled();
 
-    // Drive one lifecycle event through the daemon's composed notify to verify
-    // pushLifecycle is called best-effort (fire-and-forget via void; never throws to caller).
-    await notify({ project: "cockpit", message: "CREW DONE", record: { id: "t1", project: "cockpit", name: "crew-1", provider: "claude", state: "done" } as any, event: { type: "task.done", id: "t1" } as any });
-    // The daemon's composed notify uses `void telegram.pushLifecycle(...)` — errors never surface.
-    // We can't call the composed notify directly, but stop() completing confirms no crash.
+    // Seed a task, transition to working, then to done (an ATTENTION_STATE that
+    // triggers composedNotify → fire-and-forgets pushLifecycle). The throw must
+    // not surface to the daemon event loop.
+    await sendRequest(sockPath, { kind: "seed", record: SEED_RECORD });
+    await sendRequest(sockPath, { kind: "event", project: "cockpit", event: { type: "task.started", id: "t1" } });
+    const r1 = await sendRequest(sockPath, { kind: "event", project: "cockpit", event: { type: "task.done", id: "t1" } }) as { state: string };
+    expect(r1.state).toBe("done");
+
+    // Wait a tick for the fire-and-forget void to execute.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(pushLifecycle).toHaveBeenCalledTimes(1);
+    expect(pushLifecycle).toHaveBeenCalledWith(expect.objectContaining({ project: "cockpit", record: expect.objectContaining({ state: "done" }) }));
+
+    // Daemon is still alive after the throw — processes a subsequent request.
+    const r2 = await sendRequest(sockPath, { kind: "status", project: "cockpit", id: "t1" }) as { state: string };
+    expect(r2.state).toBe("done");
+
     await h.stop();
     expect(telegram.stop).toHaveBeenCalled();
   });
@@ -33,7 +52,6 @@ describe("cockpitd telegram wiring", () => {
   it("does not start telegram when opts.telegram is absent and config has none", async () => {
     const { stateRoot, sockPath } = tmpRoots();
     const h = startCockpitd({ stateRoot, sockPath, sweepMs: 0, rotationIntervalMs: 0 });
-    // No throw, daemon boots fine without telegram.
     await h.stop();
     expect(true).toBe(true);
   });

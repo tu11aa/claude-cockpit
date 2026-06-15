@@ -26,7 +26,7 @@ export interface TelegramSubsystem {
 export interface InboundRouterDeps {
   update: TgUpdate;
   chats: Record<string, number>;
-  findTask: (threadId: number) => { project: string; taskId: string } | undefined;
+  findTask: (project: string, threadId: number) => { project: string; taskId: string } | undefined;
   resolveCrewName: (project: string, taskId: string) => string | undefined;
   appendCaptainMessage: TelegramSubsystemDeps["appendCaptainMessage"];
   stateRoot: string;
@@ -47,7 +47,7 @@ export async function processInboundUpdate(deps: InboundRouterDeps): Promise<boo
   const [project] = entry;
 
   // Resolve target task from the topic thread (absent / unknown → captain).
-  const found = msg.message_thread_id !== undefined ? deps.findTask(msg.message_thread_id) : undefined;
+  const found = msg.message_thread_id !== undefined ? deps.findTask(project, msg.message_thread_id) : undefined;
   const taskId = found?.taskId;
   const crewName = found ? deps.resolveCrewName(found.project, found.taskId) : undefined;
 
@@ -63,13 +63,25 @@ export async function processInboundUpdate(deps: InboundRouterDeps): Promise<boo
 
 export async function createTelegramSubsystem(deps: TelegramSubsystemDeps): Promise<TelegramSubsystem> {
   const state: TelegramState = await loadTelegramState(deps.stateRoot);
+  // Serialize topic creation per (project, taskId) — prevents duplicate createForumTopic
+  // calls when two rapid lifecycle events race on a new task.
+  const creating = new Map<string, Promise<number>>();
 
   async function topicFor(project: string, chatId: number, record: TaskRecord): Promise<number> {
     const existing = state.getTopic(project, record.id);
     if (existing !== undefined) return existing;
-    const threadId = await deps.client.createForumTopic(chatId, crewTopicName(record.name ?? record.id));
-    await state.setTopic(project, record.id, threadId);
-    return threadId;
+    const k = `${project}::${record.id}`;
+    let inflight = creating.get(k);
+    if (!inflight) {
+      inflight = (async () => {
+        const threadId = await deps.client.createForumTopic(chatId, crewTopicName(record.name ?? record.id));
+        await state.setTopic(project, record.id, threadId);
+        creating.delete(k);
+        return threadId;
+      })();
+      creating.set(k, inflight);
+    }
+    return inflight;
   }
 
   async function pushLifecycle(args: { project: string; message: string; record: TaskRecord }): Promise<void> {
@@ -82,7 +94,9 @@ export async function createTelegramSubsystem(deps: TelegramSubsystemDeps): Prom
         await deps.client.closeForumTopic(chatId, threadId);
       }
     } catch (e) {
-      deps.log(`telegram push failed project=${args.project}: ${(e as Error).message}`);
+      const err = e as Error;
+      const cause = err.cause ? ` cause=${String(err.cause)}` : "";
+      deps.log(`telegram push failed project=${args.project}: ${err.message}${cause}`);
     }
   }
 
@@ -94,22 +108,32 @@ export async function createTelegramSubsystem(deps: TelegramSubsystemDeps): Prom
       while (!stopped) {
         try {
           abort = new AbortController();
-          const updates = await deps.client.getUpdates(state.offset(), 30, abort.signal);
+          // Combine manual stop signal with a client-side timeout so a black-holed
+          // TCP connection is reaped after ~35s rather than hanging indefinitely.
+          const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(35_000)]);
+          const updates = await deps.client.getUpdates(state.offset(), 30, signal);
           for (const update of updates) {
-            await processInboundUpdate({
-              update,
-              chats: deps.chats,
-              findTask: state.findTask.bind(state),
-              resolveCrewName: deps.resolveCrewName,
-              appendCaptainMessage: deps.appendCaptainMessage,
-              stateRoot: deps.stateRoot,
-              log: deps.log,
-            });
+            try {
+              await processInboundUpdate({
+                update,
+                chats: deps.chats,
+                findTask: state.findTask.bind(state),
+                resolveCrewName: deps.resolveCrewName,
+                appendCaptainMessage: deps.appendCaptainMessage,
+                stateRoot: deps.stateRoot,
+                log: deps.log,
+              });
+            } catch (e) {
+              deps.log(`telegram inbound update ${update.update_id} failed: ${(e as Error).message}`);
+            }
+            // Advance offset regardless of per-update failure — prevents poison-update wedge.
             await state.setOffset(update.update_id + 1);
           }
         } catch (e) {
           if (stopped) return;
-          deps.log(`telegram inbound loop error: ${(e as Error).message}`);
+          const err = e as Error;
+          const cause = err.cause ? ` cause=${String(err.cause)}` : "";
+          deps.log(`telegram inbound loop error: ${err.message}${cause}`);
           await new Promise((r) => setTimeout(r, 3000)); // backoff; never tight-loops
         }
       }

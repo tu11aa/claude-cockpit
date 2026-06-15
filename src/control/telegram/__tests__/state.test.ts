@@ -30,8 +30,19 @@ describe("telegram state", () => {
     const s = await loadTelegramState(freshRoot());
     await s.setTopic("cockpit", "t1", 42);
     await s.setTopic("brove", "t2", 7);
-    expect(s.findTask(42)).toEqual({ project: "cockpit", taskId: "t1" });
-    expect(s.findTask(7)).toEqual({ project: "brove", taskId: "t2" });
-    expect(s.findTask(999)).toBeUndefined();
+    expect(s.findTask("cockpit", 42)).toEqual({ project: "cockpit", taskId: "t1" });
+    expect(s.findTask("brove", 7)).toEqual({ project: "brove", taskId: "t2" });
+    expect(s.findTask("cockpit", 999)).toBeUndefined();
+  });
+
+  it("findTask scopes to project — same threadId in two projects resolves independently", async () => {
+    const s = await loadTelegramState(freshRoot());
+    // Both projects' first crew topic gets threadId=2 (small ids are common)
+    await s.setTopic("cockpit", "t1", 2);
+    await s.setTopic("brove", "t2", 2);
+    expect(s.findTask("cockpit", 2)).toEqual({ project: "cockpit", taskId: "t1" });
+    expect(s.findTask("brove", 2)).toEqual({ project: "brove", taskId: "t2" });
+    // Does not cross-match
+    expect(s.findTask("cockpit", 7)).toBeUndefined();
   });
 });

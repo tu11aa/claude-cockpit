@@ -16,7 +16,7 @@ import { CodexInteractiveDriver, shouldReattachCodex } from "./codex/driver.js";
 import { OpencodeSseBridge } from "./opencode/sse-bridge.js";
 import { makeGate } from "./codex/gate.js";
 import { appendToMailbox, rotateIfNeeded, appendCaptainMessage, mailboxStats, readCursor } from "./mailbox.js";
-import { createTelegramClient, createTelegramSubsystem, type TelegramSubsystem } from "./telegram/index.js";
+import { createTelegramClient, createTelegramSubsystem, redactToken, type TelegramSubsystem } from "./telegram/index.js";
 import { createRelayHealer } from "./relay-healer.js";
 import { projectHealth, type ComponentHealth } from "./liveness.js";
 import { assembleDaemonSnapshot, type DaemonSnapshotInputs, type ResultArtifacts } from "./snapshot.js";
@@ -582,14 +582,17 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
     // Build from config unless a test already injected a subsystem (which started above).
     if (!telegram && cfg.telegram) {
       try {
+        const { botToken } = cfg.telegram;
+        // Redact the bot token from any error the subsystem logs (it appears in API URLs).
+        const tgLog = (m: string) => log(redactToken(botToken, m));
         telegram = await createTelegramSubsystem({
-          client: createTelegramClient(cfg.telegram.botToken),
+          client: createTelegramClient(botToken),
           chats: cfg.telegram.chats,
           stateRoot,
           appendCaptainMessage,
           resolveCrewName: (project, taskId) =>
             store.listAll().find((r) => r.project === project && r.id === taskId)?.name,
-          log,
+          log: tgLog,
         });
         telegram.startInbound();
       } catch (e) {

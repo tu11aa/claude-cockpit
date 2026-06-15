@@ -4,11 +4,15 @@ import chalk from "chalk";
 import { loadConfig, saveConfig, type CockpitConfig } from "../config.js";
 import { createTelegramClient, type TgUpdate } from "../control/telegram/index.js";
 
-/** Pure: the chat_id of the most recent my_chat_member update (bot added to a group). */
+const JOINED_STATUSES = new Set(["member", "administrator", "creator"]);
+
+/** Pure: the chat_id of the most recent my_chat_member where the bot was added (not removed). */
 export function resolveLinkChatId(updates: TgUpdate[]): number | undefined {
   for (let i = updates.length - 1; i >= 0; i--) {
     const m = updates[i].my_chat_member;
-    if (m) return m.chat.id;
+    if (m && m.new_chat_member && JOINED_STATUSES.has(m.new_chat_member.status)) {
+      return m.chat.id;
+    }
   }
   return undefined;
 }

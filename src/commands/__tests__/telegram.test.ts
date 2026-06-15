@@ -15,6 +15,22 @@ describe("telegram link", () => {
   it("returns undefined when no my_chat_member update is present", () => {
     expect(resolveLinkChatId([{ update_id: 1, message: { chat: { id: -100, type: "supergroup" }, text: "hi" } }])).toBeUndefined();
   });
+
+  it("ignores removal events (left/kicked) — does not link on bot removal", () => {
+    const updates: TgUpdate[] = [
+      { update_id: 1, my_chat_member: { chat: { id: -100, type: "supergroup" }, new_chat_member: { status: "left" } } },
+      { update_id: 2, my_chat_member: { chat: { id: -200, type: "supergroup" }, new_chat_member: { status: "kicked" } } },
+    ];
+    expect(resolveLinkChatId(updates)).toBeUndefined();
+  });
+
+  it("picks the latest member/administrator join over an earlier left event", () => {
+    const updates: TgUpdate[] = [
+      { update_id: 1, my_chat_member: { chat: { id: -100, type: "supergroup" }, new_chat_member: { status: "left" } } },
+      { update_id: 2, my_chat_member: { chat: { id: -200, type: "supergroup" }, new_chat_member: { status: "member" } } },
+    ];
+    expect(resolveLinkChatId(updates)).toBe(-200);
+  });
 });
 
 describe("telegram status", () => {

@@ -36,6 +36,11 @@ interface TgResponse<T> {
   description?: string;
 }
 
+/** Replaces all occurrences of a bot token in a string with "***". */
+export function redactToken(token: string, text: string): string {
+  return text.replaceAll(token, "***");
+}
+
 export function createTelegramClient(
   botToken: string,
   fetchImpl: typeof fetch = fetch,
