@@ -49,17 +49,50 @@ function cmux(args: string[]): string {
   }
 }
 
+// Shape of `cmux workspace list --json` (cmux 0.64.16). Only the fields we
+// consume are typed; everything else in the payload is ignored.
+interface CmuxWorkspaceListJson {
+  workspaces?: Array<{
+    ref?: string;
+    custom_title?: string | null;
+    has_custom_title?: boolean;
+    current_directory?: string | null;
+  }>;
+}
+
+// Shape of `cmux tree --json` (cmux 0.64.16). Surfaces nest as
+// windows[].workspaces[].panes[].surfaces[]; only consumed fields are typed.
+interface CmuxTreeJson {
+  windows?: Array<{
+    workspaces?: Array<{
+      ref?: string;
+      panes?: Array<{
+        surfaces?: Array<{ ref?: string; surface_ref?: string; title?: string | null }>;
+      }>;
+    }>;
+  }>;
+}
+
+// Parse `cmux workspace list --json` into WorkspaceRefs. Replaces the old
+// regex over the human-readable `list-workspaces` text (audit B2). The display
+// name is the workspace's custom title when set (byte-identical to what the
+// text form showed, e.g. "⚓ cockpit-captain" — this is what cockpit matches
+// captains by), falling back to the cwd for untitled workspaces.
 function parseList(output: string): WorkspaceRef[] {
+  let parsed: CmuxWorkspaceListJson;
+  try {
+    parsed = JSON.parse(output) as CmuxWorkspaceListJson;
+  } catch {
+    return [];
+  }
   const refs: WorkspaceRef[] = [];
-  for (const line of output.split("\n")) {
-    const match = line.match(/(workspace:\d+)\s+(.+?)(?:\s+\(.*\))?(?:\s+\[selected\])?$/);
-    if (match) {
-      refs.push({
-        id: match[1],
-        name: match[2].trim(),
-        status: "running",
-      });
-    }
+  for (const ws of parsed.workspaces ?? []) {
+    if (!ws.ref) continue;
+    refs.push({
+      id: ws.ref,
+      name: (ws.has_custom_title && ws.custom_title) ? ws.custom_title : (ws.current_directory ?? ws.ref),
+      status: "running",
+    });
   }
   return refs;
 }
@@ -240,7 +273,9 @@ export function createCmuxDriver(): RuntimeDriver {
 
     async list(): Promise<WorkspaceRef[]> {
       try {
-        return parseList(cmux(["workspace", "list", "--id-format", "refs"]));
+        // --json: structured output (B2); --id-format refs: ids as
+        // workspace:N refs, not numeric (from #325). Both are required.
+        return parseList(cmux(["workspace", "list", "--json", "--id-format", "refs"]));
       } catch {
         return [];
       }
@@ -463,18 +498,32 @@ export function createCmuxDriver(): RuntimeDriver {
     async listSurfaces(workspaceId: string): Promise<PaneRef[]> {
       let output: string;
       try {
-        output = cmux(["tree", "--workspace", workspaceId, "--id-format", "refs"]);
+        // --json: structured output (B2); --id-format refs: surface ids as
+        // surface:N refs, not numeric (from #325). Both are required.
+        output = cmux(["tree", "--workspace", workspaceId, "--json", "--id-format", "refs"]);
       } catch {
         return [];
       }
+      let parsed: CmuxTreeJson;
+      try {
+        parsed = JSON.parse(output) as CmuxTreeJson;
+      } catch {
+        return [];
+      }
+      // Navigate windows[].workspaces[].panes[].surfaces[], collecting every
+      // surface that belongs to the requested workspace. Replaces the old regex
+      // over `cmux tree` text (audit B2). Surface refs are globally unique, so
+      // filtering by the parent workspace ref is sufficient.
       const surfaces: PaneRef[] = [];
-      // tree output line example:
-      //     ├── surface surface:30 [terminal] "🔧 pact-network:crew-1" [selected]
-      const re = /surface\s+(surface:\d+)\s+\[\w+\]\s+"([^"]*)"/;
-      for (const line of output.split("\n")) {
-        const match = line.match(re);
-        if (match) {
-          surfaces.push({ workspaceId, surfaceId: match[1], title: match[2] });
+      for (const win of parsed.windows ?? []) {
+        for (const ws of win.workspaces ?? []) {
+          if (ws.ref !== workspaceId) continue;
+          for (const pane of ws.panes ?? []) {
+            for (const sf of pane.surfaces ?? []) {
+              const ref = sf.ref ?? sf.surface_ref;
+              if (ref) surfaces.push({ workspaceId, surfaceId: ref, title: sf.title ?? "" });
+            }
+          }
         }
       }
       return surfaces;

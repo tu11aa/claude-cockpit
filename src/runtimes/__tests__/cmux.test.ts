@@ -15,6 +15,34 @@ vi.mock("node:child_process", () => ({
 const argvOf = (call: unknown[]): string[] => call[1] as string[];
 const cmdOf = (call: unknown[]): string => (call[1] as string[]).join(" ");
 
+// Build a `cmux workspace list --json` payload for list()/status() tests (B2).
+function wsListJson(...wss: { ref: string; title?: string; cwd?: string }[]): string {
+  return JSON.stringify({
+    window_ref: "window:1",
+    workspaces: wss.map((w, i) => ({
+      ref: w.ref,
+      custom_title: w.title ?? null,
+      has_custom_title: w.title != null,
+      current_directory: w.cwd ?? "/home/u",
+      index: i,
+    })),
+  });
+}
+
+// Build a `cmux tree --json` payload (one window/workspace/pane) for
+// listSurfaces()/send() tests (B2).
+function treeJson(workspaceRef: string, ...surfaces: { ref: string; title: string }[]): string {
+  return JSON.stringify({
+    windows: [{
+      ref: "window:1",
+      workspaces: [{
+        ref: workspaceRef,
+        panes: [{ ref: "pane:1", surfaces: surfaces.map((s, i) => ({ ref: s.ref, title: s.title, index: i })) }],
+      }],
+    }],
+  });
+}
+
 // Build a minimal screen in the real Claude Code format for parseDraftFromScreen tests.
 // Layout: optional transcript lines, then top-HR, then inputLine, then bottom-HR, then
 // a two-line status block. The HR lines use U+2500 ─ (110 chars) matching a real screen.
@@ -97,14 +125,14 @@ describe("cmux driver", () => {
     expect(result.version).toBe("");
   });
 
-  it("list calls 'workspace list' (migrated from list-workspaces) and parses output", async () => {
+  it("list parses `workspace list --json` into WorkspaceRefs (B2)", async () => {
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      if (args[0] === "workspace" && args[1] === "list") {
-        return [
-          "workspace:1  🏛️ command  (running)",
-          "workspace:2  brove-captain  [selected]",
-          "workspace:3  ⚡ reactor  (running)",
-        ].join("\n");
+      if (args.includes("list") && args.includes("--json")) {
+        return wsListJson(
+          { ref: "workspace:1", title: "🏛️ command" },
+          { ref: "workspace:2", title: "brove-captain" },
+          { ref: "workspace:3", title: "⚡ reactor" },
+        );
       }
       return "";
     });
@@ -116,9 +144,28 @@ describe("cmux driver", () => {
     expect(cmds.every((c) => !c.includes("list-workspaces"))).toBe(true);
   });
 
+  it("list falls back to cwd as the name for an untitled workspace", async () => {
+    execFileMock.mockImplementation((_bin: string, args: string[]) => {
+      if (args.includes("list") && args.includes("--json")) {
+        return wsListJson({ ref: "workspace:1", cwd: "/Users/u" });
+      }
+      return "";
+    });
+    const refs = await driver.list();
+    expect(refs).toEqual([{ id: "workspace:1", name: "/Users/u", status: "running" }]);
+  });
+
+  it("list returns [] when the JSON payload is malformed", async () => {
+    execFileMock.mockImplementation((_bin: string, args: string[]) => {
+      if (args.includes("list") && args.includes("--json")) return "not json";
+      return "";
+    });
+    expect(await driver.list()).toEqual([]);
+  });
+
   it("status returns null when name not in list", async () => {
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      if (args[0] === "workspace" && args[1] === "list") return "workspace:1  other-ws  (running)";
+      if (args.includes("list") && args.includes("--json")) return wsListJson({ ref: "workspace:1", title: "other-ws" });
       return "";
     });
     const ref = await driver.status("brove-captain");
@@ -127,7 +174,7 @@ describe("cmux driver", () => {
 
   it("status returns WorkspaceRef when name matches", async () => {
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      if (args[0] === "workspace" && args[1] === "list") return "workspace:5  brove-captain  (running)";
+      if (args.includes("list") && args.includes("--json")) return wsListJson({ ref: "workspace:5", title: "brove-captain" });
       return "";
     });
     const ref = await driver.status("brove-captain");
@@ -144,26 +191,24 @@ describe("cmux driver", () => {
 
   it("send routes to surface named after workspace when one exists", async () => {
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      const cmd = args.join(" ");
-      if (args[0] === "workspace" && args[1] === "list") return "workspace:2  test-ws  (running)";
-      if (cmd.includes("tree"))           return '  └── surface surface:5 [terminal] "test-ws"';
+      if (args.includes("list") && args.includes("--json")) return wsListJson({ ref: "workspace:2", title: "test-ws" });
+      if (args.includes("tree"))                            return treeJson("workspace:2", { ref: "surface:5", title: "test-ws" });
       return "";
     });
     await driver.send("workspace:2", "hello tab");
-    const cmds = execFileMock.mock.calls.map(cmdOf).filter((c) => !c.includes("list-workspaces") && !c.includes("tree"));
+    const cmds = execFileMock.mock.calls.map(cmdOf).filter((c) => !c.includes("list") && !c.includes("tree"));
     expect(cmds.some((c) => c.includes("send ") && c.includes("--surface surface:5") && c.includes("hello tab") && !c.includes("send-key"))).toBe(true);
     expect(cmds.some((c) => c.includes("send-key") && c.includes("--surface surface:5") && c.includes("Enter"))).toBe(true);
   });
 
   it("send falls back to workspace-level when no surface matches workspace name", async () => {
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
-      const cmd = args.join(" ");
-      if (args[0] === "workspace" && args[1] === "list") return "workspace:2  test-ws  (running)";
-      if (cmd.includes("tree"))           return '  └── surface surface:5 [terminal] "crew-1"';
+      if (args.includes("list") && args.includes("--json")) return wsListJson({ ref: "workspace:2", title: "test-ws" });
+      if (args.includes("tree"))                            return treeJson("workspace:2", { ref: "surface:5", title: "crew-1" });
       return "";
     });
     await driver.send("workspace:2", "fallback message");
-    const cmds = execFileMock.mock.calls.map(cmdOf).filter((c) => !c.includes("list-workspaces") && !c.includes("tree"));
+    const cmds = execFileMock.mock.calls.map(cmdOf).filter((c) => !c.includes("list") && !c.includes("tree"));
     expect(cmds.some((c) => c.includes("send ") && !c.includes("--surface") && c.includes("fallback message"))).toBe(true);
     expect(cmds.some((c) => c.includes("send-key") && c.includes("Enter") && !c.includes("--surface"))).toBe(true);
   });
@@ -535,17 +580,15 @@ describe("cmux driver", () => {
     })).rejects.toThrow(/did not return a surface/);
   });
 
-  it("listSurfaces parses cmux tree output and returns surfaces with titles", async () => {
+  it("listSurfaces parses `tree --json` and returns surfaces with titles (B2)", async () => {
     execFileMock.mockImplementation((_bin: string, args: string[]) => {
       if (args.includes("tree")) {
-        return [
-          'window window:1 [current] ◀ active',
-          '└── workspace workspace:10 "⚓ pact-network-captain"',
-          '    └── pane pane:29 [focused]',
-          '        ├── surface surface:29 [terminal] "✳ Run startup checklist" [selected]',
-          '        ├── surface surface:30 [terminal] "🔧 pact-network:crew-1"',
-          '        └── surface surface:31 [terminal] "🔧 pact-network:crew-2"',
-        ].join("\n");
+        return treeJson(
+          "workspace:10",
+          { ref: "surface:29", title: "✳ Run startup checklist" },
+          { ref: "surface:30", title: "🔧 pact-network:crew-1" },
+          { ref: "surface:31", title: "🔧 pact-network:crew-2" },
+        );
       }
       return "";
     });
@@ -555,15 +598,43 @@ describe("cmux driver", () => {
       { workspaceId: "workspace:10", surfaceId: "surface:30", title: "🔧 pact-network:crew-1" },
       { workspaceId: "workspace:10", surfaceId: "surface:31", title: "🔧 pact-network:crew-2" },
     ]);
-    // Verify --id-format refs is passed to lock in the refs default
+    // The tree read must request both JSON (B2) and refs id-format (#325).
     const cmds = execFileMock.mock.calls.map(cmdOf);
+    expect(cmds.some((c) => c.includes("tree") && c.includes("--json"))).toBe(true);
     expect(cmds.some((c) => c.includes("tree") && c.includes("--id-format refs"))).toBe(true);
+  });
+
+  it("listSurfaces only returns surfaces of the requested workspace", async () => {
+    execFileMock.mockImplementation((_bin: string, args: string[]) => {
+      if (args.includes("tree")) {
+        return JSON.stringify({
+          windows: [{
+            ref: "window:1",
+            workspaces: [
+              { ref: "workspace:10", panes: [{ surfaces: [{ ref: "surface:1", title: "keep" }] }] },
+              { ref: "workspace:99", panes: [{ surfaces: [{ ref: "surface:2", title: "skip" }] }] },
+            ],
+          }],
+        });
+      }
+      return "";
+    });
+    const surfaces = await driver.listSurfaces("workspace:10");
+    expect(surfaces).toEqual([{ workspaceId: "workspace:10", surfaceId: "surface:1", title: "keep" }]);
   });
 
   it("listSurfaces returns empty array when cmux throws", async () => {
     execFileMock.mockImplementation(() => { throw new Error("workspace not found"); });
     const surfaces = await driver.listSurfaces("workspace:99");
     expect(surfaces).toEqual([]);
+  });
+
+  it("listSurfaces returns empty array when the JSON payload is malformed", async () => {
+    execFileMock.mockImplementation((_bin: string, args: string[]) => {
+      if (args.includes("tree")) return "not json";
+      return "";
+    });
+    expect(await driver.listSurfaces("workspace:10")).toEqual([]);
   });
 });
 
