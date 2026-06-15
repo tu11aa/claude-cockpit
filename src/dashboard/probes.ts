@@ -14,7 +14,7 @@ import type { CockpitConfig } from "../config.js";
 import { loadConfig } from "../config.js";
 import { resolveCmuxBin } from "../lib/cmux-bin.js";
 
-export type ProbeState = "alive" | "gone" | "unknown";
+export type ProbeState = "alive" | "stale" | "gone" | "unknown";
 
 export interface Probe {
   state: ProbeState;
