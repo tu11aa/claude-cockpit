@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createTelegramSubsystem } from "../subsystem.js";
+import { createTelegramSubsystem, processInboundUpdate } from "../subsystem.js";
 import type { TelegramClient } from "../client.js";
 import type { TaskRecord } from "../../types.js";
 
@@ -72,5 +72,53 @@ describe("telegram subsystem — outbound", () => {
     const client = fakeClient({ sendMessage: vi.fn(async () => { throw new Error("network down"); }) });
     const sub = await createTelegramSubsystem(baseDeps(client, root));
     await expect(sub.pushLifecycle({ project: "cockpit", message: "x", record: rec() })).resolves.toBeUndefined();
+  });
+});
+
+describe("telegram subsystem — inbound routing (pure)", () => {
+  const chats = { cockpit: -100, brove: -200 };
+
+  it("routes a crew-topic reply to that crew's captain via appendCaptainMessage", async () => {
+    const append = vi.fn(async () => 1);
+    const findTask = (thread: number) => (thread === 42 ? { project: "cockpit", taskId: "t1" } : undefined);
+    const handled = await processInboundUpdate({
+      update: { update_id: 5, message: { chat: { id: -100, type: "supergroup" }, message_thread_id: 42, text: "use lucia" } },
+      chats, findTask, resolveCrewName: () => "crew-2",
+      appendCaptainMessage: append, stateRoot: "/tmp", log: () => {},
+    });
+    expect(handled).toBe(true);
+    expect(append).toHaveBeenCalledWith({ stateRoot: "/tmp", project: "cockpit", message: "📩 [from Telegram · crew-2] use lucia", taskId: "t1", name: "crew-2" });
+  });
+
+  it("routes a general-topic reply to the captain (no task)", async () => {
+    const append = vi.fn(async () => 1);
+    await processInboundUpdate({
+      update: { update_id: 6, message: { chat: { id: -100, type: "supergroup" }, text: "status?" } },
+      chats, findTask: () => undefined, resolveCrewName: () => undefined,
+      appendCaptainMessage: append, stateRoot: "/tmp", log: () => {},
+    });
+    expect(append).toHaveBeenCalledWith({ stateRoot: "/tmp", project: "cockpit", message: "📩 [from Telegram] status?", taskId: undefined, name: undefined });
+  });
+
+  it("ignores updates from a non-allowlisted chat", async () => {
+    const append = vi.fn(async () => 1);
+    const handled = await processInboundUpdate({
+      update: { update_id: 7, message: { chat: { id: -999, type: "supergroup" }, text: "rm -rf" } },
+      chats, findTask: () => undefined, resolveCrewName: () => undefined,
+      appendCaptainMessage: append, stateRoot: "/tmp", log: () => {},
+    });
+    expect(handled).toBe(false);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("ignores updates with no text (e.g. join events)", async () => {
+    const append = vi.fn(async () => 1);
+    const handled = await processInboundUpdate({
+      update: { update_id: 8, message: { chat: { id: -100, type: "supergroup" } } },
+      chats, findTask: () => undefined, resolveCrewName: () => undefined,
+      appendCaptainMessage: append, stateRoot: "/tmp", log: () => {},
+    });
+    expect(handled).toBe(false);
+    expect(append).not.toHaveBeenCalled();
   });
 });
