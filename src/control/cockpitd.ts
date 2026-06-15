@@ -15,7 +15,8 @@ import { runHeadless } from "./headless-launcher.js";
 import { CodexInteractiveDriver, shouldReattachCodex } from "./codex/driver.js";
 import { OpencodeSseBridge } from "./opencode/sse-bridge.js";
 import { makeGate } from "./codex/gate.js";
-import { appendToMailbox, rotateIfNeeded, mailboxStats, readCursor } from "./mailbox.js";
+import { appendToMailbox, rotateIfNeeded, appendCaptainMessage, mailboxStats, readCursor } from "./mailbox.js";
+import { createTelegramClient, createTelegramSubsystem, type TelegramSubsystem } from "./telegram/index.js";
 import { createRelayHealer } from "./relay-healer.js";
 import { projectHealth, type ComponentHealth } from "./liveness.js";
 import { assembleDaemonSnapshot, type DaemonSnapshotInputs, type ResultArtifacts } from "./snapshot.js";
@@ -90,6 +91,8 @@ export interface CockpitdOpts {
     /** CP3: POST the captain's approve/deny decision to the crew's server. */
     answer: (taskId: string, decision: "approve" | "deny") => Promise<boolean>;
   };
+  /** Inject a fake Telegram subsystem for tests. Absent + no config.telegram = feature off. */
+  telegram?: TelegramSubsystem;
 }
 
 // ── Tier 0/2 snapshot gathering (I/O at the edge; the pure assembly lives in
@@ -183,7 +186,8 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   let lastSweepAt: number | null = null;
   // #225: hard crew task-timeout ceiling, read once at boot. Falls back to the
   // daemon's DEFAULT_TASK_TIMEOUT_MS (8h) when unset in config.
-  const taskTimeoutMs = loadConfig().defaults.taskTimeoutMs;
+  const cfg = loadConfig();
+  const taskTimeoutMs = cfg.defaults.taskTimeoutMs;
   const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
   const spawn = opts.spawn ?? realSpawn;
   const resultsDir = join(stateRoot, "_results");
@@ -368,10 +372,26 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       log(`mailbox append failed project=${args.project}: ${(e as Error).message}`);
     }
   };
-  const notify = opts.notify ?? defaultNotify;
+  const baseNotify = opts.notify ?? defaultNotify;
+
+  // #65 Telegram: opt-in, crash-contained. Mutable so the lazy boot IIFE can
+  // assign the subsystem after reconcile while composedNotify closes over it.
+  let telegram: TelegramSubsystem | null = opts.telegram ?? null;
+  // Injected subsystems (tests) start immediately; config-built ones start inside the IIFE.
+  if (telegram) telegram.startInbound();
+  const composedNotify = async (args: {
+    project: string;
+    message: string;
+    record: TaskRecord;
+    event: ControlEvent;
+  }): Promise<void> => {
+    await baseNotify(args);
+    // best-effort, never blocks/throws into the daemon
+    void telegram?.pushLifecycle({ project: args.project, message: args.message, record: args.record });
+  };
 
   const d = createDaemon({
-    store, now: () => Date.now(), isPidAlive, notify, taskTimeoutMs,
+    store, now: () => Date.now(), isPidAlive, notify: composedNotify, taskTimeoutMs,
     // #139 backstop: terminalize interactive crews whose cmux pane is provably
     // gone (sweep/reconcile reaper). Three-valued; "unknown" never reaps.
     isSurfaceAlive: opts.isSurfaceAlive ?? proxiedSurfaceAlive,
@@ -557,6 +577,26 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       if (!rec.serverPort) continue;
       opencodeBridge.start({ taskId: rec.id, port: rec.serverPort });
     }
+
+    // #65 Telegram subsystem boot (after reconcile so the store is warm).
+    // Build from config unless a test already injected a subsystem (which started above).
+    if (!telegram && cfg.telegram) {
+      try {
+        telegram = await createTelegramSubsystem({
+          client: createTelegramClient(cfg.telegram.botToken),
+          chats: cfg.telegram.chats,
+          stateRoot,
+          appendCaptainMessage,
+          resolveCrewName: (project, taskId) =>
+            store.listAll().find((r) => r.project === project && r.id === taskId)?.name,
+          log,
+        });
+        telegram.startInbound();
+      } catch (e) {
+        log(`telegram init failed (feature disabled this boot): ${(e as Error).message}`);
+        telegram = null;
+      }
+    }
   })();
 
   const server = startServer(sockPath, {
@@ -707,6 +747,7 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       if (timer) clearInterval(timer);
       if (rotationTimer) clearInterval(rotationTimer);
       for (const kill of activeHeadlessKills) kill();
+      telegram?.stop();
       return new Promise<void>((resolve) => server.close(() => { log("stopped"); resolve(); }));
     },
   };
