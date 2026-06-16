@@ -78,22 +78,21 @@ describe("cockpitd daemon-direct (#332)", () => {
     const stateRoot = join(dir, "state");
     mkdirSync(join(stateRoot, "inbox"), { recursive: true });
 
-    // Seed a message for delivery on the first tick. Also seed a store task so
-    // project "p" appears in the delivery tick's project iteration.
-    await appendToMailbox({ stateRoot, project: "p", taskRecord: TASK, event: EVENT, message: "CREW DONE" });
+    // Seed first message (delivered on tick 1). A second message is appended
+    // after the reap (before tick 5) to prove delivery resumes.
+    await appendToMailbox({ stateRoot, project: "p", taskRecord: TASK, event: EVENT, message: "CREW DONE #1" });
     await writeCursor({ stateRoot, project: "p", subscriber: "captain", lastAckedSeq: 0 });
     mkdirSync(join(stateRoot, "p"), { recursive: true });
     writeFileSync(join(stateRoot, "p", `${TASK.id}.json`), JSON.stringify(TASK));
 
     const captainTitle = "p-captain";
-    // Mock: first tick → captain present; subsequent ticks → captain absent (gone)
     let surfCall = 0;
     const surfResults: PaneRef[][] = [
-      [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],    // tick 1: found
+      [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],    // tick 1: found → deliver #1
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "some-other-pane" }], // tick 2: gone
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "some-other-pane" }], // tick 3: gone
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "some-other-pane" }], // tick 4: gone → reap
-      [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],      // tick 5: would resume but reaped
+      [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],      // tick 5: un-reap + deliver #2
     ];
     const cmux = {
       sent: [] as Array<{ text: string }>,
@@ -123,9 +122,76 @@ describe("cockpitd daemon-direct (#332)", () => {
     if (handle.tickDelivery) await handle.tickDelivery(); // streak=3 → reaped
     expect(cmux.sent.length).toBe(1);
 
-    // Tick 5: captain surface reappears but project is reaped → no delivery.
-    if (handle.tickDelivery) await handle.tickDelivery();
+    // Append a second message to prove delivery resumes.
+    await appendToMailbox({ stateRoot, project: "p", taskRecord: TASK, event: EVENT, message: "CREW DONE #2" });
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 5: deliver #2
+    expect(cmux.sent.length).toBe(2);
+  });
+
+  it("reap is NON-terminal: resume on reappearance, re-enter after K on fresh cycle", async () => {
+    dir = mkdtempSync(join(tmpdir(), "cp-dd-reap2-"));
+    const sock = join(dir, "c.sock");
+    const stateRoot = join(dir, "state");
+    mkdirSync(join(stateRoot, "inbox"), { recursive: true });
+
+    // Seed first message (delivered on tick 1). Second message appended after
+    // reap (before tick 5) to prove delivery resumes.
+    await appendToMailbox({ stateRoot, project: "p", taskRecord: TASK, event: EVENT, message: "CREW DONE #1" });
+    await writeCursor({ stateRoot, project: "p", subscriber: "captain", lastAckedSeq: 0 });
+    mkdirSync(join(stateRoot, "p"), { recursive: true });
+    writeFileSync(join(stateRoot, "p", `${TASK.id}.json`), JSON.stringify(TASK));
+
+    const captainTitle = "p-captain";
+    let surfCall = 0;
+    const surfResults: PaneRef[][] = [
+      [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],    // tick 1: found → deliver
+      [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 2: gone    streak=1
+      [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 3: gone    streak=2
+      [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 4: gone    streak=3 → reap fires (once)
+      [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],    // tick 5: found   → un-reap + deliver
+      [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 6: gone    streak=1 (fresh cycle)
+      [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 7: gone    streak=2
+      [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 8: gone    streak=3 → reap fires again
+    ];
+    const cmux = {
+      sent: [] as Array<{ text: string }>,
+      send: async (_surface: PaneRef, text: string) => { (cmux as any).sent.push({ text }); },
+      listSurfaces: async () => surfResults[surfCall++],
+      readScreen: async () => null,
+      isAvailable: async () => true,
+      findWorkspaceId: async (name: string) => name === captainTitle ? "ws:1" : null,
+    } as unknown as DaemonCmux & { sent: Array<{ text: string }> };
+
+    const handle = startCockpitd({
+      stateRoot, sockPath: sock, sweepMs: 0,
+      daemonCmux: cmux,
+      daemonDirectCmux: true,
+    });
+    stop = handle.stop;
+
+    // Phase 1: present → absent → reap.
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 1: deliver
     expect(cmux.sent.length).toBe(1);
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 2: streak=1
+    expect(cmux.sent.length).toBe(1);
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 3: streak=2
+    expect(cmux.sent.length).toBe(1);
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 4: streak=3 → reap
+    expect(cmux.sent.length).toBe(1);
+
+    // Phase 2: append second message, then reappear → resume delivery.
+    await appendToMailbox({ stateRoot, project: "p", taskRecord: TASK, event: EVENT, message: "CREW DONE #2" });
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 5: deliver #2
+    expect(cmux.sent.length).toBe(2);
+
+    // Phase 3: absent again → fresh streak → reap again.
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 6: streak=1
+    expect(cmux.sent.length).toBe(2);
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 7: streak=2
+    expect(cmux.sent.length).toBe(2);
+    if (handle.tickDelivery) await handle.tickDelivery(); // tick 8: streak=3 → reap again
+    expect(cmux.sent.length).toBe(2);
+    // If tick 9 had captain found, delivery would resume to 3.
   });
 
   it("does NOT reap on a single transient empty sweep (K>1)", async () => {

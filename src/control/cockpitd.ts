@@ -755,8 +755,6 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       ])];
 
       for (const project of allProjects) {
-        if (stoppedProjects.has(project)) continue;
-
         const projCfg = cfg.projects?.[project];
         const captainTitle = projCfg?.captainName ?? `${project}-captain`;
 
@@ -774,7 +772,15 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
         // Fall back to injected surface (tests / config-less projects).
         if (!surface) surface = injectedSurfaces[project] ?? null;
 
-        if (!surface) {
+        if (surface) {
+          // Captain found — if previously reaped, un-reap and reset streak so
+          // delivery resumes (a relaunched captain creates a new pane).
+          if (stoppedProjects.has(project)) {
+            stoppedProjects.delete(project);
+            captainMissingStreak.set(project, 0);
+          }
+          captainMissingStreak.set(project, 0);
+        } else {
           // Streak tracking: surfaces.length > 0 means cmux is reachable but the
           // captain's pane is provably absent. surfaces.length === 0 means cmux
           // was unreachable (fail-soft → []), which we treat as "unknown" — never
@@ -783,15 +789,16 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
             const streak = (captainMissingStreak.get(project) ?? 0) + 1;
             captainMissingStreak.set(project, streak);
             if (streak >= CAPTAIN_GONE_STREAK_K) {
-              stoppedProjects.add(project);
-              log(`captain ${captainTitle}: surface gone for ${CAPTAIN_GONE_STREAK_K} sweeps — stopping delivery`);
+              // Fire the reap log exactly ONCE on the transition (only the first
+              // absent sweep past K). Do NOT re-fire on subsequent sweeps.
+              if (!stoppedProjects.has(project)) {
+                stoppedProjects.add(project);
+                log(`captain ${captainTitle}: surface gone for ${CAPTAIN_GONE_STREAK_K} sweeps — stopping delivery`);
+              }
             }
           }
           continue;
         }
-
-        // Captain found — reset streak.
-        captainMissingStreak.set(project, 0);
 
         const cursor = await readCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER });
         const lastAcked = cursor?.lastAckedSeq ?? 0;
