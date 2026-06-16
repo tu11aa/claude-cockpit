@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCockpitd, discoverCaptainSurface } from "../cockpitd.js";
 import { appendToMailbox, writeCursor } from "../mailbox.js";
+import { sendRequest } from "../protocol.js";
+import { crewPaneTitle } from "../crew-pane-reader.js";
 import type { DaemonCmux } from "../cmux/daemon-cmux.js";
 import type { PaneRef } from "../../runtimes/types.js";
 import type { TaskRecord, ControlEvent } from "../types.js";
@@ -29,6 +31,18 @@ function fakeCmux(): DaemonCmux & { sent: Array<{ text: string }> } {
     findWorkspaceId: async () => null, // cmux workspaces not available in test
   } as unknown as DaemonCmux & { sent: Array<{ text: string }> };
 }
+
+// A claude permission dialog (box-drawing chrome included) — classifyPaneTail
+// recognises this as an approval wait. Copied from notify-relay-probe.test.ts.
+const APPROVAL_TAIL = [
+  "● I'll create the file now.",
+  "╭──────────────────────────────────────────────────────╮",
+  "│ Do you want to create newfile.txt?                     │",
+  "│ ❯ 1. Yes                                               │",
+  "│   2. No, and tell Claude what to do differently        │",
+  "╰──────────────────────────────────────────────────────╯",
+  "  accept edits on (shift+tab to cycle)                    ",
+].join("\n");
 
 describe("cockpitd daemon-direct (#332)", () => {
   let stop: (() => void) | undefined;
@@ -87,7 +101,10 @@ describe("cockpitd daemon-direct (#332)", () => {
 
     const captainTitle = "p-captain";
     let surfCall = 0;
+    // Index 0 is consumed by d.reconcile() on boot (checks surface liveness).
+    // Then tick 1 uses index 1, tick 2 uses index 2, etc.
     const surfResults: PaneRef[][] = [
+      [{ workspaceId: "ws:1", surfaceId: "s0", title: captainTitle }],     // reconcile (boot): found
       [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],    // tick 1: found → deliver #1
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "some-other-pane" }], // tick 2: gone
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "some-other-pane" }], // tick 3: gone
@@ -143,7 +160,9 @@ describe("cockpitd daemon-direct (#332)", () => {
 
     const captainTitle = "p-captain";
     let surfCall = 0;
+    // Index 0 is consumed by d.reconcile() on boot. Then tick 1 uses index 1, etc.
     const surfResults: PaneRef[][] = [
+      [{ workspaceId: "ws:1", surfaceId: "s0", title: captainTitle }],     // reconcile (boot): found
       [{ workspaceId: "ws:1", surfaceId: "s1", title: captainTitle }],    // tick 1: found → deliver
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 2: gone    streak=1
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "other" }],          // tick 3: gone    streak=2
@@ -205,11 +224,12 @@ describe("cockpitd daemon-direct (#332)", () => {
     mkdirSync(join(stateRoot, "p"), { recursive: true });
     writeFileSync(join(stateRoot, "p", `${TASK.id}.json`), JSON.stringify(TASK));
 
-    // Mock: first tick → gone (wrong title), second tick → captain found
+    // Mock: reconcile consumes index 0, then tick 1 uses index 1, tick 2 uses index 2
     let callIdx = 0;
     const results: PaneRef[][] = [
+      [{ workspaceId: "ws:1", surfaceId: "s0", title: "p-captain" }],      // reconcile (boot): found
       [{ workspaceId: "ws:1", surfaceId: "s2", title: "some-other-pane" }], // tick 1: gone
-      [{ workspaceId: "ws:1", surfaceId: "s1", title: "p-captain" }], // tick 2: found
+      [{ workspaceId: "ws:1", surfaceId: "s1", title: "p-captain" }],       // tick 2: found
     ];
     const captainTitle = "p-captain";
     const cmux = {
@@ -259,5 +279,51 @@ describe("cockpitd daemon-direct (#332)", () => {
 
     expect((handle as any).tickDelivery).toBeUndefined();
     expect(cmux.sent).toEqual([]);
+  });
+
+  it("flag ON: daemon-direct probe emits task.blocked when interactive crew pane shows a permission prompt", async () => {
+    dir = mkdtempSync(join(tmpdir(), "cp-dd-probe-"));
+    const sock = join(dir, "c.sock");
+    const stateRoot = join(dir, "state");
+    mkdirSync(join(stateRoot, "inbox"), { recursive: true });
+
+    // Seed a working interactive task that is quiet enough to be probed.
+    const worker: TaskRecord = {
+      id: "probe-1", project: "p", provider: "claude", mode: "interactive",
+      state: "working", task: "x", createdAt: 1, lastHeartbeat: 1,
+      lastEvent: "", heartbeatBudgetMs: 1000,
+      name: "worker",
+      attempts: [{ attemptId: "a0", startedAt: 1, lastHeartbeatAt: 1 }],
+    };
+
+    const cmux = {
+      sent: [] as Array<{ text: string }>,
+      send: async () => {},
+      listSurfaces: async () => [
+        { workspaceId: "ws:1", surfaceId: "s1", title: crewPaneTitle("p", "worker") },
+      ],
+      readScreen: async () => APPROVAL_TAIL,
+      isAvailable: async () => true,
+      findWorkspaceId: async () => "ws:1",
+    } as unknown as DaemonCmux & { sent: Array<{ text: string }> };
+
+    const handle = startCockpitd({
+      stateRoot, sockPath: sock, sweepMs: 0,
+      daemonCmux: cmux,
+      daemonDirectCmux: true,
+    });
+    stop = handle.stop;
+
+    // Seed the task into the daemon's store.
+    await sendRequest(sock, { kind: "seed", record: worker });
+
+    // Wait for boot reconcile to settle, then trigger the probe tick.
+    await new Promise((r) => setTimeout(r, 20));
+    if ((handle as any).tickProbe) await (handle as any).tickProbe();
+
+    // Verify task transitioned to blocked. lastEvent is "task.blocked"
+    // (the event type); reason is protocol/logging-only per state-machine.ts.
+    const updated = await sendRequest(sock, { kind: "status", project: "p", id: "probe-1" }) as TaskRecord;
+    expect(updated.state).toBe("blocked");
   });
 });
