@@ -1,5 +1,6 @@
 import { loadConfig } from "../config.js";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
+import type { DaemonCmux } from "./cmux/daemon-cmux.js";
 import type { TaskRecord } from "./types.js";
 
 const TAIL_LINES = 25;
@@ -84,6 +85,62 @@ export function createCrewPaneReader(): (rec: TaskRecord) => Promise<string | nu
       const pane = surfaces.find((s) => s.title === want);
       if (!pane) return null;
       const screen = await runtime.readPaneScreen(pane);
+      if (!screen) return null;
+      return screen.split(/\r?\n/).slice(-TAIL_LINES).join("\n");
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Build a direct surface-liveness probe for daemon-direct mode (#332).
+ * Uses DaemonCmux to list surfaces directly (bypassing the relay/proxy).
+ * Fail-soft: `listSurfaces` returning `[]` (error or empty) → "unknown"
+ * so a transient cmux outage never false-reaps a live crew. Non-empty list
+ * without the wanted pane → "gone". Never throws.
+ */
+export function createDirectSurfaceLivenessProbe(
+  cmux: DaemonCmux,
+  getCaptainTitle: (project: string) => string,
+): (rec: TaskRecord) => Promise<SurfaceLiveness> {
+  return async (rec) => {
+    try {
+      if (rec.mode !== "interactive" || !rec.name) return "unknown";
+      const wsId = await cmux.findWorkspaceId(getCaptainTitle(rec.project));
+      if (!wsId) return "unknown";
+      const surfaces = await cmux.listSurfaces(wsId);
+      if (surfaces.length === 0) return "unknown";
+      return surfaceVerdict(
+        surfaces.map((s) => s.title ?? ""),
+        crewPaneTitle(rec.project, rec.name),
+      );
+    } catch {
+      return "unknown";
+    }
+  };
+}
+
+/**
+ * Build a direct crew-pane reader for daemon-direct mode (#332).
+ * Uses DaemonCmux.readScreen directly instead of the RuntimeRegistry path
+ * (which relies on relay-proxy). Returns the last ~25 lines of the crew's
+ * cmux pane, or null on any failure. Never throws.
+ */
+export function createDirectCrewPaneReader(
+  cmux: DaemonCmux,
+  getCaptainTitle: (project: string) => string,
+): (rec: TaskRecord) => Promise<string | null> {
+  return async (rec) => {
+    try {
+      if (!rec.name) return null;
+      const wsId = await cmux.findWorkspaceId(getCaptainTitle(rec.project));
+      if (!wsId) return null;
+      const surfaces = await cmux.listSurfaces(wsId);
+      const want = crewPaneTitle(rec.project, rec.name);
+      const pane = surfaces.find((s) => s.title === want);
+      if (!pane) return null;
+      const screen = await cmux.readPaneScreen(pane);
       if (!screen) return null;
       return screen.split(/\r?\n/).slice(-TAIL_LINES).join("\n");
     } catch {

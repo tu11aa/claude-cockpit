@@ -16,8 +16,11 @@ import { CodexInteractiveDriver, shouldReattachCodex } from "./codex/driver.js";
 import { OpencodeSseBridge } from "./opencode/sse-bridge.js";
 import { CmuxEventsBridge } from "./cmux/events-bridge.js";
 import { makeGate } from "./codex/gate.js";
-import { appendToMailbox, rotateIfNeeded, mailboxStats, readCursor } from "./mailbox.js";
+import { appendToMailbox, rotateIfNeeded, mailboxStats, readCursor, writeCursor, readFromCursor } from "./mailbox.js";
 import { createRelayHealer } from "./relay-healer.js";
+import { createDirectSurfaceLivenessProbe, createDirectCrewPaneReader } from "./crew-pane-reader.js";
+import { createInteractiveProbe } from "../commands/notify-relay.js";
+import { CaptainDelivery } from "./delivery/captain-delivery.js";
 import { projectHealth, type ComponentHealth } from "./liveness.js";
 import { assembleDaemonSnapshot, type DaemonSnapshotInputs, type ResultArtifacts } from "./snapshot.js";
 import { loadConfig } from "../config.js";
@@ -25,6 +28,8 @@ import { readdir } from "node:fs/promises";
 import type { Gate, TaskRecord, ControlEvent } from "./types.js";
 import { TERMINAL_STATES } from "./types.js";
 import type { Socket } from "node:net";
+import type { PaneRef } from "../runtimes/types.js";
+import type { DaemonCmux } from "./cmux/daemon-cmux.js";
 
 // This module's own compiled file — its mtime is the dist build-time used for
 // the Tier 0 build-freshness check (process start vs build time). package.json
@@ -97,6 +102,17 @@ export interface CockpitdOpts {
   /** B1: inject a fake cmux events bridge for tests. Defaults to a real one
    *  (gated on defaults.cmuxEventsBridge). */
   cmuxEventsBridge?: { start: () => void; stop: () => void };
+  /** #332: inject a fake DaemonCmux for testing daemon-direct delivery. When
+   *  absent and daemonDirectCmux is ON, a real cmux driver is created. */
+  daemonCmux?: DaemonCmux;
+  /** #332: override for daemonDirectCmux flag (bypasses config file load).
+   *  When true and daemonCmux is provided/injected, runs the daemon-direct
+   *  delivery loop instead of relying on the notify-relay. */
+  daemonDirectCmux?: boolean;
+  /** #332: injected captain-surface mapping (project → PaneRef) for the
+   *  daemon-direct delivery loop. Used as fallback when real discovery (Task 5)
+   *  returns no surface (e.g. cmux not reachable or captain not yet running). */
+  captainSurfaces?: Record<string, PaneRef>;
 }
 
 // ── Tier 0/2 snapshot gathering (I/O at the edge; the pure assembly lives in
@@ -173,6 +189,17 @@ function gatherResults(resultsDir: string): ResultArtifacts {
     }
   } catch { /* no results dir */ }
   return { fileCount, totalBytes };
+}
+
+const CAPTAIN_GONE_STREAK_K = 3;
+export type ListSurfacesFn = (wsId: string) => Promise<PaneRef[]>;
+
+/**
+ * Pure: search a list of surfaces for one whose title matches the captain name.
+ * Part of #332 daemon-direct captain-surface discovery (Task 5).
+ */
+export function discoverCaptainSurface(surfaces: PaneRef[], captainTitle: string): PaneRef | null {
+  return surfaces.find((s) => s.title === captainTitle) ?? null;
 }
 
 export function defaultIsPidAlive(pid: number): boolean {
@@ -406,11 +433,28 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   };
   const notify = opts.notify ?? defaultNotify;
 
+  // #332: daemon-direct flag resolved here so both the surface-liveness probe
+  // (below) and the delivery loop (further down) agree on the same value.
+  const daemonDirectCmux = opts.daemonDirectCmux ?? loadConfig().defaults?.daemonDirectCmux ?? false;
+
+  // #332: daemon-direct mode replaces the proxy-based surface liveness probe
+  // with a direct cmux probe (DaemonCmux.listSurfaces + surfaceVerdict).
+  const surfaceProbe = opts.isSurfaceAlive
+    ?? (daemonDirectCmux && opts.daemonCmux
+      ? createDirectSurfaceLivenessProbe(
+          opts.daemonCmux,
+          (project) => {
+            const cfg = loadConfig();
+            return cfg.projects?.[project]?.captainName ?? `${project}-captain`;
+          },
+        )
+      : proxiedSurfaceAlive);
+
   const d = createDaemon({
     store, now: () => Date.now(), isPidAlive, notify, taskTimeoutMs,
     // #139 backstop: terminalize interactive crews whose cmux pane is provably
     // gone (sweep/reconcile reaper). Three-valued; "unknown" never reaps.
-    isSurfaceAlive: opts.isSurfaceAlive ?? proxiedSurfaceAlive,
+    isSurfaceAlive: surfaceProbe,
     // #207 best-effort relay heal on the sweep (secondary — surface is primary).
     healRelay: opts.healRelay ?? createRelayHealer(log),
     launchHeadless: opts.launchHeadless ?? (async (rec) => {
@@ -706,6 +750,142 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   });
   log(`started pid=${process.pid} sock=${sockPath} stateRoot=${stateRoot}`);
 
+  // #332: daemon-direct delivery loop — replaces relay EGRESS when flag ON.
+  // Each tick reads from the project's mailbox cursor and delivers via
+  // DaemonCmux + CaptainDelivery. Returns `tickDelivery` so tests can trigger
+  // it manually; in production the caller sets up an interval (or the CLU
+  // entrypoint below adds one).
+  let deliveryTick: (() => Promise<void>) | undefined;
+  let probeTick: (() => Promise<void>) | undefined;
+  const captainMissingStreak = new Map<string, number>();
+  const stoppedProjects = new Set<string>();
+
+  if (daemonDirectCmux && opts.daemonCmux) {
+    const cmux = opts.daemonCmux;
+    const cfg = loadConfig();
+    const deliveries = new Map<string, CaptainDelivery>();
+
+    deliveryTick = async () => {
+      const injectedSurfaces = opts.captainSurfaces ?? {};
+      const allProjects = [...new Set([
+        ...Object.keys(cfg.projects ?? {}),
+        ...Object.keys(injectedSurfaces),
+        ...store.listAll().map((t) => t.project),
+      ])];
+
+      for (const project of allProjects) {
+        const projCfg = cfg.projects?.[project];
+        const captainTitle = projCfg?.captainName ?? `${project}-captain`;
+
+        // Try real discovery from cmux.
+        const wsId = cmux.findWorkspaceId ? await cmux.findWorkspaceId(captainTitle) : null;
+        let surface: PaneRef | null = null;
+        let surfacesLength = 0;
+
+        if (wsId) {
+          const surfaces = await cmux.listSurfaces(wsId);
+          surfacesLength = surfaces.length;
+          surface = discoverCaptainSurface(surfaces, captainTitle);
+        }
+
+        // Fall back to injected surface (tests / config-less projects).
+        if (!surface) surface = injectedSurfaces[project] ?? null;
+
+        if (surface) {
+          // Captain found — if previously reaped, un-reap and reset streak so
+          // delivery resumes (a relaunched captain creates a new pane).
+          if (stoppedProjects.has(project)) {
+            stoppedProjects.delete(project);
+            captainMissingStreak.set(project, 0);
+          }
+          captainMissingStreak.set(project, 0);
+        } else {
+          // Streak tracking: surfaces.length > 0 means cmux is reachable but the
+          // captain's pane is provably absent. surfaces.length === 0 means cmux
+          // was unreachable (fail-soft → []), which we treat as "unknown" — never
+          // increment the streak (no false reaping on transient outages).
+          if (surfacesLength > 0) {
+            const streak = (captainMissingStreak.get(project) ?? 0) + 1;
+            captainMissingStreak.set(project, streak);
+            if (streak >= CAPTAIN_GONE_STREAK_K) {
+              // Fire the reap log exactly ONCE on the transition (only the first
+              // absent sweep past K). Do NOT re-fire on subsequent sweeps.
+              if (!stoppedProjects.has(project)) {
+                stoppedProjects.add(project);
+                log(`captain ${captainTitle}: surface gone for ${CAPTAIN_GONE_STREAK_K} sweeps — stopping delivery`);
+              }
+            }
+          }
+          continue;
+        }
+
+        const cursor = await readCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER });
+        const lastAcked = cursor?.lastAckedSeq ?? 0;
+        let d = deliveries.get(project);
+        if (!d) {
+          d = new CaptainDelivery({
+            maxDefers: cfg.relay?.maxDeferDeliveries ?? 300,
+            stableProbePolls: cfg.relay?.stableProbePolls ?? 3,
+          });
+          deliveries.set(project, d);
+        }
+        for await (const entry of readFromCursor({ stateRoot, project, fromSeq: lastAcked + 1 })) {
+          const result = await d.deliver(entry, (text, sendOpts) =>
+            cmux.send(surface!, text, sendOpts),
+          );
+          if ("delivered" in result) {
+            await writeCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER, lastAckedSeq: entry.seq });
+          } else {
+            break;
+          }
+        }
+      }
+    };
+
+    // #332: daemon-direct blocked-crew detection. Reuses createInteractiveProbe
+    // (from notify-relay.ts) with a direct cmux pane reader injected as the
+    // readPaneTail dep. Matches the relay's PROBE_INTERVAL_MS (10s).
+    const directPaneReader = createDirectCrewPaneReader(cmux, (project) => {
+      const cfg2 = loadConfig();
+      return cfg2.projects?.[project]?.captainName ?? `${project}-captain`;
+    });
+
+    const interactiveProbe = createInteractiveProbe({
+      project: "_all_",
+      listTasks: async () => store.listAll(),
+      readPaneTail: directPaneReader,
+      sendEvent: async (event) => {
+        const rec = store.listAll().find((r) => r.id === event.id);
+        if (rec) {
+          await d.handle({ kind: "event", project: rec.project, event });
+        }
+      },
+      now: () => Date.now(),
+      log,
+    });
+    probeTick = interactiveProbe.tick;
+  }
+
+  // #332: production delivery interval (1s poll). Gated on sweepMs so tests
+  // with sweepMs:0 avoid a real timer. The interval is always fire-and-forget so
+  // a slow tick never stacks.
+  let deliveryTimer: NodeJS.Timeout | undefined;
+  if (daemonDirectCmux && opts.daemonCmux && opts.sweepMs && opts.sweepMs > 0) {
+    deliveryTimer = setInterval(() => {
+      void deliveryTick!().catch((e: unknown) => log(`delivery tick error: ${(e as Error).message}`));
+    }, 1000);
+    deliveryTimer.unref?.();
+  }
+
+  // #332: blocked-crew probe interval (10s). Same gate as delivery interval.
+  let probeTimer: NodeJS.Timeout | undefined;
+  if (daemonDirectCmux && opts.daemonCmux && opts.sweepMs && opts.sweepMs > 0) {
+    probeTimer = setInterval(() => {
+      void probeTick!().catch((e: unknown) => log(`probe tick error: ${(e as Error).message}`));
+    }, 10_000);
+    probeTimer.unref?.();
+  }
+
   let timer: NodeJS.Timeout | undefined;
   if (opts.sweepMs && opts.sweepMs > 0) {
     // sweep() is async (#139: it probes cmux surface liveness). Guard against an
@@ -754,12 +934,16 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
 
   return {
     stop(): Promise<void> {
+      if (deliveryTimer) clearInterval(deliveryTimer);
+      if (probeTimer) clearInterval(probeTimer);
       if (timer) clearInterval(timer);
       if (rotationTimer) clearInterval(rotationTimer);
       try { cmuxEventsBridge.stop(); } catch { /* best-effort */ }
       for (const kill of activeHeadlessKills) kill();
       return new Promise<void>((resolve) => server.close(() => { log("stopped"); resolve(); }));
     },
+    tickDelivery: deliveryTick,
+    tickProbe: probeTick,
   };
 }
 
