@@ -14,7 +14,7 @@ import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js"
 import { ensureSpokeLayout } from "../lib/vault-layout.js";
 import { resolveCmuxBin } from "../lib/cmux-bin.js";
 import { buildRelaySupervisorCommand, NOTIFY_RELAY_TAB_TITLE } from "../control/relay-supervisor.js";
-import { CMUX_TIMEOUT, classifyStartupSurface, parseDraftFromScreen } from "../runtimes/cmux.js";
+import { CMUX_TIMEOUT, classifyStartupSurface } from "../runtimes/cmux.js";
 
 const CMUX_APP = "/Applications/cmux.app";
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
@@ -224,11 +224,14 @@ export async function deliverStartupPrompt(
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Phase 1 — wait out cold init (poll, don't guess with a fixed delay).
+    // Keep the last-read screen as the pre-send baseline for the Phase-3 check.
     const deadline = Date.now() + readyTimeoutMs;
-    let state = classifyStartupSurface(await read());
+    let preSend = await read();
+    let state = classifyStartupSurface(preSend);
     while (state === "loading" && Date.now() < deadline) {
       await sleep(pollMs);
-      state = classifyStartupSurface(await read());
+      preSend = await read();
+      state = classifyStartupSurface(preSend);
     }
 
     // A turn is already in flight (a prior attempt landed, or a resumed session
@@ -243,29 +246,21 @@ export async function deliverStartupPrompt(
     // Timed out waiting for chrome — sent blind once; nothing to confirm, stop.
     if (state === "loading") return;
 
-    // Phase 3 — confirm via the INPUT BOX, not the working-spinner.
-    //
-    // DRAFT FIX (debug side-session, cmux 0.64.16 double-startup bug): the old
-    // guard "re-send only if NOT working" relied on classifyStartupSurface →
-    // CC_WORKING_RE matching the live spinner. The new CC (Opus 4.8) renders the
-    // early thinking phase as a BARE "✽ Synthesizing…" (no timer/token/shell
-    // marker) and then streams "⏺ Thinking about …" with no spinner line at all —
-    // none of which CC_WORKING_RE matches. So a captain that has ALREADY accepted
-    // the prompt and is busy thinking reads as "idle" at the +settleMs check, and
-    // the loop re-sends → DOUBLE startup run (verified: 9/9 working frames of a
-    // real startup turn classified "idle"). classifyStartupSurface is unchanged
-    // since v0.6.2 — this is a cmux/CC render drift (audit finding A3), not a
-    // cockpit-code regression.
-    //
-    // Robust signal: a LANDED prompt leaves the input box empty; DROPPED
-    // keystrokes leave the prompt sitting unsubmitted in the box. parseDraftFromScreen
-    // returns "" for an empty box, null when the box isn't visible (working render),
-    // and the draft text only when real content remains. Re-send ONLY on a real
-    // remaining draft — proven to suppress every false re-send across the whole
-    // working turn while still catching genuinely-dropped keystrokes (#235).
+    // Phase 3 — confirm by whether the surface CHANGED, not by re-matching a
+    // working-spinner. The old guard re-sent "while still idle", relying on
+    // classifyStartupSurface → CC_WORKING_RE matching the live spinner. The newer
+    // CC renders the early turn as a bare "✽ Synthesizing…" (no timer/token/shell
+    // marker) and streams "⏺ Thinking…" with no spinner line at all — none of
+    // which CC_WORKING_RE matches — so a captain that ALREADY accepted the prompt
+    // and is busy thinking reads as "idle" at the +settleMs sample, and the loop
+    // re-sends → duplicate startup run (cmux/CC render drift, audit A3; the code
+    // is unchanged since v0.6.2). A LANDED prompt always mutates the surface (the
+    // submitted message echoes into the transcript and the turn begins); DROPPED
+    // keystrokes (#235) leave the surface byte-identical to the pre-send baseline.
+    // Re-send only on no-change — robust to whatever the spinner renders as.
     await sleep(settleMs);
-    const draft = parseDraftFromScreen(await read());
-    if (draft === "" || draft === null) return;
+    const after = await read();
+    if (after !== preSend) return;
   }
 }
 

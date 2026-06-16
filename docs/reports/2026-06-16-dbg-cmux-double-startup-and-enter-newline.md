@@ -55,22 +55,32 @@ cockpit `send`+`send-key Enter` pattern, captured the surface every 0.25s from a
 frame. Result above: the agent is misclassified "idle" for the majority of an
 active working turn, including the `settleMs` window.
 
-### Draft fix (on scratch — `src/commands/launch.ts` Phase 3)
-Confirm via the **input box**, not the spinner. A landed prompt leaves the box
-empty; dropped keystrokes leave the prompt sitting in it.
+### Fix (applied — `src/commands/launch.ts` Phase 3, `deliverStartupPrompt`)
+Confirm by whether the surface **changed**, not by re-matching the spinner.
+Snapshot the screen just before the send; after `settleMs`, re-send **only if the
+screen is byte-identical** to that baseline.
 
 ```ts
+// Phase 1 keeps the last read as `preSend`.
 await sleep(settleMs);
-const draft = parseDraftFromScreen(await read());
-if (draft === "" || draft === null) return;   // box empty / not visible → landed
-// else: real draft still present → keystrokes dropped → loop & re-send (#235)
+const after = await read();
+if (after !== preSend) return;   // landed (transcript/spinner changed); no re-send
+// identical → keystrokes dropped (#235) → loop & re-send (bounded by maxAttempts)
 ```
 
-**Verified:** `parseDraftFromScreen` returns `""` for **all 9/9** working frames
-the current code misreads as "idle" → zero false re-sends, while a genuinely
-unsubmitted prompt (non-empty draft) still triggers the legitimate #235 retry.
-`parseDraftFromScreen` already strips `Press … to …` ghosts (#294) so a working
-ghost line cannot be mistaken for a remaining draft.
+**Why not the input box:** box-emptiness can't distinguish a *landed+working*
+captain (box empty) from a *#235 splash-drop* (box also empty — the prompt never
+arrived). Change-detection separates them: a landed prompt **always** mutates the
+surface (the submitted message echoes into the transcript and the turn begins),
+while a dropped send leaves it identical. This is also what the sibling crew path
+(`sendFirstTurnWhenReady`, #168) already does.
+
+**Verified:**
+- Hand-traced against all 8 existing `deliverStartupPrompt` tests — all map cleanly
+  (landed = screen changes to WORKING; dropped = screen stays IDLE).
+- Added regression test `does NOT re-send when the captain is thinking with an
+  unrecognized spinner` using the real captured `✽ Synthesizing…` frame.
+- `tsc --noEmit` clean; **full suite 1223/1223 pass** (15/15 in launch.test.ts).
 
 > Note: the crew first-turn path (`sendFirstTurnWhenReady`, `src/commands/crew.ts:152`)
 > uses a different but related confirmation (`isTurnAccepted` over a pre-send
@@ -137,7 +147,14 @@ cause of either bug. Capture live surfaces from a *different* surface only.
 ---
 
 ## Artifacts
-- Draft patch: `src/commands/launch.ts` (Phase 3 box-confirmation) on branch `crew/dbg-cmux`.
+- **Fix (applied):** `src/commands/launch.ts` Phase 3 change-detection +
+  regression test in `src/commands/__tests__/launch.test.ts`, on branch
+  `crew/dbg-cmux`. tsc clean, 1223/1223 tests pass.
 - This report: `docs/reports/2026-06-16-dbg-cmux-double-startup-and-enter-newline.md`.
 - Repro harness (ephemeral, /tmp/dbg): verbatim `classifyStartupSurface` /
   `parseDraftFromScreen` classifiers + captured CC turn frames.
+
+## Still open for a crew (BUG 2)
+BUG 2 (Enter→newline on crew DONE) is **not fixed** — not reproduced. Recommend
+adding the relay `sendToSurface` delivery instrumentation described above to catch
+it in the wild before attempting a fix.
