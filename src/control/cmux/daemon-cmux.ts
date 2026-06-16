@@ -34,6 +34,15 @@ export class DaemonCmux {
     catch { return null; }
   }
 
+  async findWorkspaceId(name: string): Promise<string | null> {
+    try {
+      const ref = await this.driver.status(name);
+      return ref?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async isAvailable(): Promise<boolean> {
     try { await this.driver.listSurfaces(""); return true; }
     catch { return false; }

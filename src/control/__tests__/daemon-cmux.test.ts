@@ -26,4 +26,15 @@ describe("DaemonCmux", () => {
     expect(await new DaemonCmux({ listSurfaces: async () => [] } as any).isAvailable()).toBe(true);
     expect(await new DaemonCmux({ listSurfaces: async () => { throw new Error(); } } as any).isAvailable()).toBe(false);
   });
+
+  it("findWorkspaceId returns workspace ID when found, null when not found or error", async () => {
+    const found = await new DaemonCmux({ status: async () => ({ id: "ws:42" }) } as any).findWorkspaceId("captain");
+    expect(found).toBe("ws:42");
+
+    const miss = await new DaemonCmux({ status: async () => null } as any).findWorkspaceId("ghost");
+    expect(miss).toBeNull();
+
+    const err = await new DaemonCmux({ status: async () => { throw new Error("gone"); } } as any).findWorkspaceId("err");
+    expect(err).toBeNull();
+  });
 });

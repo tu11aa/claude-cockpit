@@ -108,7 +108,8 @@ export interface CockpitdOpts {
    *  delivery loop instead of relying on the notify-relay. */
   daemonDirectCmux?: boolean;
   /** #332: injected captain-surface mapping (project → PaneRef) for the
-   *  daemon-direct delivery loop. Task 5 replaces this with real discovery. */
+   *  daemon-direct delivery loop. Used as fallback when real discovery (Task 5)
+   *  returns no surface (e.g. cmux not reachable or captain not yet running). */
   captainSurfaces?: Record<string, PaneRef>;
 }
 
@@ -186,6 +187,17 @@ function gatherResults(resultsDir: string): ResultArtifacts {
     }
   } catch { /* no results dir */ }
   return { fileCount, totalBytes };
+}
+
+const CAPTAIN_GONE_STREAK_K = 3;
+export type ListSurfacesFn = (wsId: string) => Promise<PaneRef[]>;
+
+/**
+ * Pure: search a list of surfaces for one whose title matches the captain name.
+ * Part of #332 daemon-direct captain-surface discovery (Task 5).
+ */
+export function discoverCaptainSurface(surfaces: PaneRef[], captainTitle: string): PaneRef | null {
+  return surfaces.find((s) => s.title === captainTitle) ?? null;
 }
 
 export function defaultIsPidAlive(pid: number): boolean {
@@ -725,6 +737,8 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   // it manually; in production the caller sets up an interval (or the CLU
   // entrypoint below adds one).
   let deliveryTick: (() => Promise<void>) | undefined;
+  const captainMissingStreak = new Map<string, number>();
+  const stoppedProjects = new Set<string>();
 
   const daemonDirectCmux = opts.daemonDirectCmux ?? loadConfig().defaults?.daemonDirectCmux ?? false;
   if (daemonDirectCmux && opts.daemonCmux) {
@@ -733,8 +747,52 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
     const deliveries = new Map<string, CaptainDelivery>();
 
     deliveryTick = async () => {
-      const surfaces = opts.captainSurfaces ?? {};
-      for (const [project, surface] of Object.entries(surfaces)) {
+      const injectedSurfaces = opts.captainSurfaces ?? {};
+      const allProjects = [...new Set([
+        ...Object.keys(cfg.projects ?? {}),
+        ...Object.keys(injectedSurfaces),
+        ...store.listAll().map((t) => t.project),
+      ])];
+
+      for (const project of allProjects) {
+        if (stoppedProjects.has(project)) continue;
+
+        const projCfg = cfg.projects?.[project];
+        const captainTitle = projCfg?.captainName ?? `${project}-captain`;
+
+        // Try real discovery from cmux.
+        const wsId = cmux.findWorkspaceId ? await cmux.findWorkspaceId(captainTitle) : null;
+        let surface: PaneRef | null = null;
+        let surfacesLength = 0;
+
+        if (wsId) {
+          const surfaces = await cmux.listSurfaces(wsId);
+          surfacesLength = surfaces.length;
+          surface = discoverCaptainSurface(surfaces, captainTitle);
+        }
+
+        // Fall back to injected surface (tests / config-less projects).
+        if (!surface) surface = injectedSurfaces[project] ?? null;
+
+        if (!surface) {
+          // Streak tracking: surfaces.length > 0 means cmux is reachable but the
+          // captain's pane is provably absent. surfaces.length === 0 means cmux
+          // was unreachable (fail-soft → []), which we treat as "unknown" — never
+          // increment the streak (no false reaping on transient outages).
+          if (surfacesLength > 0) {
+            const streak = (captainMissingStreak.get(project) ?? 0) + 1;
+            captainMissingStreak.set(project, streak);
+            if (streak >= CAPTAIN_GONE_STREAK_K) {
+              stoppedProjects.add(project);
+              log(`captain ${captainTitle}: surface gone for ${CAPTAIN_GONE_STREAK_K} sweeps — stopping delivery`);
+            }
+          }
+          continue;
+        }
+
+        // Captain found — reset streak.
+        captainMissingStreak.set(project, 0);
+
         const cursor = await readCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER });
         const lastAcked = cursor?.lastAckedSeq ?? 0;
         let d = deliveries.get(project);
@@ -747,7 +805,7 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
         }
         for await (const entry of readFromCursor({ stateRoot, project, fromSeq: lastAcked + 1 })) {
           const result = await d.deliver(entry, (text, sendOpts) =>
-            cmux.send(surface, text, sendOpts),
+            cmux.send(surface!, text, sendOpts),
           );
           if (result.delivered) {
             await writeCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER, lastAckedSeq: entry.seq });
@@ -757,6 +815,17 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
         }
       }
     };
+  }
+
+  // #332: production delivery interval (1s poll). Gated on sweepMs so tests
+  // with sweepMs:0 avoid a real timer. The interval is always fire-and-forget so
+  // a slow tick never stacks.
+  let deliveryTimer: NodeJS.Timeout | undefined;
+  if (daemonDirectCmux && opts.daemonCmux && opts.sweepMs && opts.sweepMs > 0) {
+    deliveryTimer = setInterval(() => {
+      void deliveryTick!().catch((e: unknown) => log(`delivery tick error: ${(e as Error).message}`));
+    }, 1000);
+    deliveryTimer.unref?.();
   }
 
   let timer: NodeJS.Timeout | undefined;
@@ -807,6 +876,7 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
 
   return {
     stop(): Promise<void> {
+      if (deliveryTimer) clearInterval(deliveryTimer);
       if (timer) clearInterval(timer);
       if (rotationTimer) clearInterval(rotationTimer);
       try { cmuxEventsBridge.stop(); } catch { /* best-effort */ }
