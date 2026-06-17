@@ -11,8 +11,8 @@ import type { AgentDriver, Role } from "../drivers/types.js";
 import { RuntimeRegistry, createCmuxDriver } from "../runtimes/index.js";
 import type { RuntimeDriver } from "../runtimes/index.js";
 import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
-import { ensureSpokeLayout } from "../lib/vault-layout.js";
-import { resolveCmuxBin } from "../lib/cmux-bin.js";
+import { ensureSpokeLayout } from "@cockpit/shared";
+import { resolveCmuxBin } from "@cockpit/shared";
 import { buildRelaySupervisorCommand, NOTIFY_RELAY_TAB_TITLE } from "../control/relay-supervisor.js";
 import { CMUX_TIMEOUT, classifyStartupSurface } from "../runtimes/cmux.js";
 

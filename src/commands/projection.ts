@@ -18,7 +18,7 @@ import type { WorkspaceDriver } from "@cockpit/shared";
 import {
   readUserLevelSource,
   readProjectLevelSource,
-} from "../lib/canonical-source.js";
+} from "@cockpit/shared";
 
 type Opts = {
   scope?: "user" | "project";

@@ -14,8 +14,8 @@ import {
 } from "../drivers/index.js";
 import type { PaneRef, PanePlacement } from "../runtimes/types.js";
 import { resolveCaptainWorkspace, sendFirstTurnWhenReady } from "./crew.js";
-import { resolveTextInput } from "../lib/resolve-text-input.js";
-import { addWorktree, removeWorktree, worktreePath } from "../lib/git-worktree.js";
+import { resolveTextInput } from "@cockpit/shared";
+import { addWorktree, removeWorktree, worktreePath } from "@cockpit/shared";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 

@@ -11,7 +11,7 @@ import { syncHub, type SyncHubResult } from "../dashboard/sync-hub.js";
 import { startWebServer } from "../dashboard/web-server.js";
 import { defaultProbeRunners } from "../dashboard/probes.js";
 import type { PaneRef } from "../runtimes/types.js";
-import { resolveCmuxBin } from "../lib/cmux-bin.js";
+import { resolveCmuxBin } from "@cockpit/shared";
 
 const SOCK = join(homedir(), ".config", "cockpit", "cockpit.sock");
 

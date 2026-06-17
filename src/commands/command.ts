@@ -13,7 +13,7 @@ import {
   CapabilityRegistry,
 } from "../drivers/index.js";
 import type { PaneRef } from "../runtimes/types.js";
-import { resolveCmuxBin } from "../lib/cmux-bin.js";
+import { resolveCmuxBin } from "@cockpit/shared";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 

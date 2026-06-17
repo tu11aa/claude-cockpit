@@ -11,7 +11,7 @@ import {
   resolveHome,
 } from "@cockpit/shared";
 import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
-import { ensureRuntimeSynced } from "../lib/runtime-sync.js";
+import { ensureRuntimeSynced } from "@cockpit/shared";
 
 function findPackageRoot(): string {
   let dir = path.dirname(new URL(import.meta.url).pathname);

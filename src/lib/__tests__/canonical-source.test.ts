@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import os from "node:os";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { readUserLevelSource, readProjectLevelSource } from "../canonical-source.js";
+import { readUserLevelSource, readProjectLevelSource } from "@cockpit/shared";
 import { createObsidianDriver } from "../../workspaces/index.js";
 import type { WorkspaceDriver } from "@cockpit/shared";
 

@@ -7,6 +7,11 @@
   "bin": {
     "cockpit": "./dist/index.js"
   },
+  "files": [
+    "dist/",
+    "plugin/",
+    "templates/"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

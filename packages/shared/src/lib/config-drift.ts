@@ -1,4 +1,4 @@
-import type { CockpitConfig } from "@cockpit/shared";
+import type { CockpitConfig } from "../config.js";
 
 export type DriftKind = "missing" | "deprecated" | "changed-default" | "invalid";
 export type DriftSeverity = "info" | "advisory" | "warn";

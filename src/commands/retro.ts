@@ -12,7 +12,7 @@ import {
   enumerateDays,
   iso,
   daysAgo,
-} from "../lib/daily-logs.js";
+} from "@cockpit/shared";
 import { createObsidianDriver, WorkspaceRegistry } from "../workspaces/index.js";
 
 interface StatusFrontmatter {

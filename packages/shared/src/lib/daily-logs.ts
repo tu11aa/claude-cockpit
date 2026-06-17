@@ -2,8 +2,8 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
-import { resolveHome } from "@cockpit/shared";
-import type { WorkspaceDriver } from "@cockpit/shared";
+import { resolveHome } from "../config.js";
+import type { WorkspaceDriver } from "../types/workspaces.js";
 
 export function iso(d: Date): string {
   return d.toISOString().slice(0, 10);

@@ -1,4 +1,4 @@
-import type { WorkspaceDriver } from "@cockpit/shared";
+import type { WorkspaceDriver } from "../types/workspaces.js";
 
 export const SPOKE_SUBDIRS = [
   "crew",

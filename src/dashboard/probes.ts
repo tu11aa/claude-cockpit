@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import type { CockpitConfig } from "@cockpit/shared";
 import { loadConfig } from "@cockpit/shared";
-import { resolveCmuxBin } from "../lib/cmux-bin.js";
+import { resolveCmuxBin } from "@cockpit/shared";
 
 export type ProbeState = "alive" | "stale" | "gone" | "unknown";
 

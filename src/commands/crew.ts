@@ -20,8 +20,8 @@ import type { PaneRef, PanePlacement, RuntimeDriver } from "../runtimes/types.js
 import { buildDispatchRequest, cockpitdCall, sendCodexFirstTurn } from "./crew-control.js";
 import { tailLines } from "./crew-output.js";
 import { writePerCrewSettingsLocal, writePerCrewOpencodeConfig } from "../lib/per-crew-settings.js";
-import { addWorktree, removeWorktree } from "../lib/git-worktree.js";
-import { resolveTextInput } from "../lib/resolve-text-input.js";
+import { addWorktree, removeWorktree } from "@cockpit/shared";
+import { resolveTextInput } from "@cockpit/shared";
 import { TERMINAL_STATES, type TaskRecord } from "@cockpit/shared";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");

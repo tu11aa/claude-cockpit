@@ -30,7 +30,7 @@ import { TERMINAL_STATES } from "@cockpit/shared";
 import type { Socket } from "node:net";
 import type { PaneRef } from "../runtimes/types.js";
 import { DaemonCmux } from "./cmux/daemon-cmux.js";
-import { ensureCmuxAutoConfig, type AutoConfigResult } from "../lib/cmux-autoconfig.js";
+import { ensureCmuxAutoConfig, type AutoConfigResult } from "@cockpit/shared";
 import { createCmuxDriver } from "../runtimes/index.js";
 
 // This module's own compiled file — its mtime is the dist build-time used for

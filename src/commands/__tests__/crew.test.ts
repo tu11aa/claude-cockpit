@@ -37,9 +37,11 @@ vi.mock("../../runtimes/index.js", () => ({
 }));
 
 const loadConfig = vi.hoisted(() => vi.fn());
+const addWorktree = vi.hoisted(() => vi.fn());
+const removeWorktree = vi.hoisted(() => vi.fn());
 vi.mock("@cockpit/shared", async () => {
   const actual = await vi.importActual<typeof import("@cockpit/shared")>("@cockpit/shared");
-  return { ...actual, loadConfig, resolveHome: (p: string) => p };
+  return { ...actual, loadConfig, resolveHome: (p: string) => p, addWorktree, removeWorktree };
 });
 
 const claudeDriver = vi.hoisted(() => ({
@@ -78,12 +80,6 @@ vi.mock("../../lib/per-crew-settings.js", () => ({
   writePerCrewOpencodeConfig,
 }));
 
-const addWorktree = vi.hoisted(() => vi.fn());
-const removeWorktree = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/git-worktree.js", () => ({
-  addWorktree,
-  removeWorktree,
-}));
 
 const existsSyncMock = vi.hoisted(() => vi.fn());
 const readFileSyncMock = vi.hoisted(() => vi.fn());
