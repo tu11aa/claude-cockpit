@@ -34,7 +34,7 @@ import { groupCommand } from "./commands/group.js";
 import { cmuxCommand } from "./commands/cmux.js";
 import { detectDrift } from "./lib/config-drift.js";
 import { needsCheck, withStamp } from "./lib/config-version.js";
-import { getDefaultConfig } from "./config.js";
+import { getDefaultConfig } from "@cockpit/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8"));

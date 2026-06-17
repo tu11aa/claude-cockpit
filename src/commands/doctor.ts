@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
-import { loadConfig } from "../config.js";
+import { loadConfig } from "@cockpit/shared";
 import { compatManifest, type ToolEntry } from "../lib/compat-manifest.js";
 import { checkToolCompat } from "../lib/tool-compat.js";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";

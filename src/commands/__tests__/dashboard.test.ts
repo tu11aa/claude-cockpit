@@ -23,7 +23,7 @@ vi.mock("../../runtimes/index.js", () => ({
 }));
 
 const loadConfig = vi.hoisted(() => vi.fn());
-vi.mock("../../config.js", () => ({
+vi.mock("@cockpit/shared", () => ({
   loadConfig,
   resolveHome: (p: string) => p.replace(/^~/, process.env.HOME ?? ""),
 }));

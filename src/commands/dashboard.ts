@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
-import { loadConfig } from "../config.js";
+import { loadConfig } from "@cockpit/shared";
 import { createCmuxDriver, RuntimeRegistry } from "../runtimes/index.js";
 import { readAllStatuses } from "../dashboard/read-status.js";
 import { renderDashboard } from "../dashboard/render.js";

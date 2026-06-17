@@ -40,8 +40,8 @@ vi.mock("../../lib/canonical-source.js", () => ({
 }));
 
 // Mock loadConfig with a shape matching the real CockpitConfig — adapt if Step 3 shows different fields.
-vi.mock("../../config.js", async () => {
-  const actual = await vi.importActual<typeof import("../../config.js")>("../../config.js");
+vi.mock("@cockpit/shared", async () => {
+  const actual = await vi.importActual<typeof import("@cockpit/shared")>("@cockpit/shared");
   return {
     ...actual,
     loadConfig: () => ({

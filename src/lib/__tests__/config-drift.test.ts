@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { detectDrift, applySafeFixes } from "../config-drift.js";
-import { getDefaultConfig } from "../../config.js";
+import { getDefaultConfig } from "@cockpit/shared";
 
 function userConfig() {
   const c = getDefaultConfig();

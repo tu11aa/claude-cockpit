@@ -1,4 +1,4 @@
-import { resolveHome, type CockpitConfig } from "../config.js";
+import { resolveHome, type CockpitConfig } from "@cockpit/shared";
 import type {
   WorkspaceDriver,
   WorkspaceFactory,

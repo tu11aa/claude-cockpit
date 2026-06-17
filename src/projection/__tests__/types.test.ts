@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { CockpitConfig } from "../../config.js";
+import type { CockpitConfig } from "@cockpit/shared";
 import type {
   ProjectionSource,
   ProjectionDestination,

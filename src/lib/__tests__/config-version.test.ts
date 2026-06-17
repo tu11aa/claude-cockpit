@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readStamp, needsCheck, withStamp } from "../config-version.js";
-import type { CockpitConfig } from "../../config.js";
+import type { CockpitConfig } from "@cockpit/shared";
 
 const base = (over: Partial<CockpitConfig> = {}): CockpitConfig =>
   ({ commandName: "x", hubVault: "/h", projects: {}, defaults: {} as any, metrics: { enabled: false, path: "/m" }, ...over });

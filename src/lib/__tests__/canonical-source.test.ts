@@ -4,7 +4,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { readUserLevelSource, readProjectLevelSource } from "../canonical-source.js";
 import { createObsidianDriver } from "../../workspaces/index.js";
-import type { WorkspaceDriver } from "../../workspaces/types.js";
+import type { WorkspaceDriver } from "@cockpit/shared";
 
 function memDriver(files: Record<string, string>): WorkspaceDriver {
   return {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { WorkspaceDriver } from "../workspaces/types.js";
-import type { ProjectionSource } from "../projection/types.js";
+import type { WorkspaceDriver } from "@cockpit/shared";
+import type { ProjectionSource } from "@cockpit/shared";
 
 interface SkillFrontmatter {
   name: string;

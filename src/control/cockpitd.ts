@@ -23,10 +23,10 @@ import { createInteractiveProbe, STALE_THRESHOLD_MS } from "../commands/notify-r
 import { CaptainDelivery } from "./delivery/captain-delivery.js";
 import { projectHealth, type ComponentHealth } from "./liveness.js";
 import { assembleDaemonSnapshot, type DaemonSnapshotInputs, type ResultArtifacts } from "./snapshot.js";
-import { loadConfig } from "../config.js";
+import { loadConfig } from "@cockpit/shared";
 import { readdir } from "node:fs/promises";
-import type { Gate, TaskRecord, ControlEvent } from "./types.js";
-import { TERMINAL_STATES } from "./types.js";
+import type { Gate, TaskRecord, ControlEvent } from "@cockpit/shared";
+import { TERMINAL_STATES } from "@cockpit/shared";
 import type { Socket } from "node:net";
 import type { PaneRef } from "../runtimes/types.js";
 import { DaemonCmux } from "./cmux/daemon-cmux.js";
