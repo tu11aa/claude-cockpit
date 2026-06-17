@@ -3,7 +3,7 @@ import type {
   WorkspaceDriver,
   WorkspaceFactory,
   WorkspaceProbeResult,
-} from "./types.js";
+} from "@cockpit/shared";
 
 const DEFAULT_WORKSPACE = "obsidian";
 

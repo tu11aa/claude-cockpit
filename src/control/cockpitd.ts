@@ -412,7 +412,7 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
       log,
     });
 
-  const ingest = (project: string) => (e: import("./types.js").ControlEvent) =>
+  const ingest = (project: string) => (e: import("@cockpit/shared").ControlEvent) =>
     void d.handle({ kind: "event", project, event: e });
 
   // Default push-notification wiring (mailbox-injector spec): the daemon

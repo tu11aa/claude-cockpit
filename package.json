@@ -13,10 +13,10 @@
     "templates/"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsc -b --force packages/shared && tsup",
     "dev": "tsup --watch",
     "test": "vitest",
-    "lint": "tsc -b --noEmit || tsc --noEmit",
+    "lint": "tsc --noEmit",
     "codex:gen-types": "bash scripts/gen-codex-types.sh"
   },
   "keywords": [
@@ -32,13 +32,13 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@cockpit/shared": "workspace:*",
     "chalk": "^5.4.0",
     "commander": "^13.0.0",
     "gray-matter": "^4.0.3",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
+    "@cockpit/shared": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",

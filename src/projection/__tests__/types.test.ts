@@ -6,7 +6,7 @@ import type {
   ProjectionEmitter,
   ProjectionEmitResult,
   ProjectionEmitterFactory,
-} from "../types.js";
+} from "@cockpit/shared";
 
 describe("projection types", () => {
   it("CockpitConfig accepts optional projection.targets", () => {
