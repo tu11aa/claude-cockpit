@@ -30,6 +30,7 @@ import { TERMINAL_STATES } from "./types.js";
 import type { Socket } from "node:net";
 import type { PaneRef } from "../runtimes/types.js";
 import { DaemonCmux } from "./cmux/daemon-cmux.js";
+import { ensureCmuxAutoConfig, type AutoConfigResult } from "../lib/cmux-autoconfig.js";
 import { createCmuxDriver } from "../runtimes/index.js";
 
 // This module's own compiled file — its mtime is the dist build-time used for
@@ -118,6 +119,10 @@ export interface CockpitdOpts {
    *  daemon-direct delivery loop. Used as fallback when real discovery (Task 5)
    *  returns no surface (e.g. cmux not reachable or captain not yet running). */
   captainSurfaces?: Record<string, PaneRef>;
+  /** #348: override the cmux socket auto-config re-check (write+probe). Tests
+   *  inject a fake; in production it runs only when daemonDirectCmux is ON and
+   *  not under vitest. See cmux-autoconfig.ts. */
+  runCmuxAutoConfig?: () => Promise<AutoConfigResult>;
 }
 
 // ── Tier 0/2 snapshot gathering (I/O at the edge; the pure assembly lives in
@@ -660,6 +665,25 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
     const cmuxEventsSafe = !!opts.cmuxEventsBridge || !process.env.VITEST;
     if (enableCmuxEvents && cmuxEventsSafe) {
       try { cmuxEventsBridge.start(); } catch (e) { log(`cmux events bridge start failed: ${(e as Error).message}`); }
+    }
+
+    // #348: when daemon-direct is opt-in ON, ensure the cmux socket auto-config
+    // (comment-preserving write + non-cmux probe) on every boot. Idempotent, and
+    // it recovers the "cmux not running at first write" edge case (§3.4 / §4.4):
+    // the next boot re-probes once cmux is (re)launched. Gated on the flag so it's
+    // a no-op under the relay default; skipped under vitest unless injected so
+    // daemon tests never touch the real cmux.json or spawn the orphan probe.
+    const autoConfigSafe = !!opts.runCmuxAutoConfig || !process.env.VITEST;
+    if (daemonDirectCmux && autoConfigSafe) {
+      try {
+        const r = await (opts.runCmuxAutoConfig ?? ensureCmuxAutoConfig)();
+        if (r.configChanged) log(`cmux autoconfig: wrote automation socket mode to ${r.configPath}`);
+        if (r.needsRestart && r.promptedThisRun) {
+          log("cmux autoconfig: socket still rejects the daemon — restart cmux to enable daemon-direct delivery");
+        }
+      } catch (e) {
+        log(`cmux autoconfig failed: ${(e as Error).message}`);
+      }
     }
   })();
 
