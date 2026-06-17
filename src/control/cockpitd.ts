@@ -6,6 +6,7 @@ import { createDaemon } from "./daemon.js";
 import { buildContext } from "./daemon/context.js";
 import { createAttach } from "./daemon/attach.js";
 import { createProbes, buildSurfaceProbe } from "./daemon/probes.js";
+import { createDelivery } from "./daemon/delivery.js";
 export type { CockpitdOpts } from "./daemon/context.js";
 export { defaultIsPidAlive } from "./daemon/context.js";
 import { startServer, encodeFrame, type AttachFrame, type AttachInbound } from "./protocol.js";
@@ -13,10 +14,9 @@ import { runHeadless } from "./headless-launcher.js";
 import { CodexInteractiveDriver, shouldReattachCodex } from "./codex/driver.js";
 import { OpencodeSseBridge } from "./opencode/sse-bridge.js";
 import { CmuxEventsBridge } from "./cmux/events-bridge.js";
-import { appendToMailbox, rotateIfNeeded, mailboxStats, readCursor, writeCursor, readFromCursor } from "./mailbox.js";
+import { rotateIfNeeded, mailboxStats, readCursor } from "./mailbox.js";
 import { createRelayHealer } from "./relay-healer.js";
 import { STALE_THRESHOLD_MS } from "../commands/notify-relay.js";
-import { CaptainDelivery } from "./delivery/captain-delivery.js";
 import { projectHealth, type ComponentHealth } from "./liveness.js";
 import { assembleDaemonSnapshot, type DaemonSnapshotInputs } from "./snapshot.js";
 import { loadConfig } from "@cockpit/shared";
@@ -43,7 +43,6 @@ const PKG_VERSION = readPkgVersion();
 const SNAPSHOT_LOG_WINDOW_MS = 60 * 60 * 1000; // count daemon-log errors in the last hour
 const CURSOR_SUBSCRIBER = "captain"; // the relay drains the mailbox as "captain" (#207)
 
-const CAPTAIN_GONE_STREAK_K = 3;
 export type ListSurfacesFn = (wsId: string) => Promise<PaneRef[]>;
 
 /**
@@ -155,42 +154,21 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   const ingest = (project: string) => (e: import("@cockpit/shared").ControlEvent) =>
     void d.handle({ kind: "event", project, event: e });
 
-  // Default push-notification wiring (mailbox-injector spec): the daemon
-  // appends a JSON entry to <stateRoot>/inbox/<project>.log. An injector
-  // process running inside the captain workspace tails the file from its
-  // cursor and delivers each entry to the captain pane. The daemon never
-  // shells out to cmux; the captain owns delivery. Tests inject a fake
-  // `notify` to assert call shape without exercising the mailbox path.
-  const defaultNotify = async (args: {
-    project: string;
-    message: string;
-    record: TaskRecord;
-    event: ControlEvent;
-  }): Promise<void> => {
-    try {
-      await appendToMailbox({
-        stateRoot,
-        project: args.project,
-        taskRecord: args.record,
-        event: args.event,
-        // Persist the daemon-rendered message (#214/#210): the relay delivers it
-        // verbatim instead of re-deriving from the raw event (which drifted).
-        message: args.message,
-      });
-    } catch (e) {
-      log(`mailbox append failed project=${args.project}: ${(e as Error).message}`);
-    }
-  };
-  const notify = opts.notify ?? defaultNotify;
-
   // #332: daemon-direct flag resolved here so both the surface-liveness probe
-  // (below) and the delivery loop (further down) agree on the same value.
+  // and the delivery loop agree on the same value.
   const daemonDirectCmux = opts.daemonDirectCmux ?? loadConfig().defaults?.daemonDirectCmux ?? false;
 
   // #332: construct DaemonCmux in production when the flag is ON but no
   // injectable was provided. The factory is overridable for tests.
   const daemonCmux = opts.daemonCmux
     ?? (daemonDirectCmux ? (opts.makeDaemonCmux ?? (() => new DaemonCmux(createCmuxDriver())))() : undefined);
+
+  // Set late-bound driver fields on ctx before createDelivery reads them.
+  ctx.daemonDirectCmux = daemonDirectCmux;
+  ctx.daemonCmux = daemonCmux;
+
+  const { defaultNotify, deliveryTick: initialDeliveryTick } = createDelivery(ctx, daemonCmux, daemonDirectCmux);
+  const notify = opts.notify ?? defaultNotify;
 
   const surfaceProbe = buildSurfaceProbe(ctx, probes, daemonDirectCmux, daemonCmux);
 
@@ -515,130 +493,14 @@ export function startCockpitd(opts: CockpitdOpts = {}) {
   });
   log(`started pid=${process.pid} sock=${sockPath} stateRoot=${stateRoot}`);
 
-  // #332: daemon-direct delivery loop — replaces relay EGRESS when flag ON.
-  // Each tick reads from the project's mailbox cursor and delivers via
-  // DaemonCmux + CaptainDelivery. Returns `tickDelivery` so tests can trigger
-  // it manually; in production the caller sets up an interval (or the CLU
-  // entrypoint below adds one).
-  let deliveryTick: (() => Promise<void>) | undefined;
+  // #332: daemon-direct delivery loop — see daemon/delivery.ts.
+  let deliveryTick: (() => Promise<void>) | undefined = initialDeliveryTick;
   let probeTick: (() => Promise<void>) | undefined;
 
   if (daemonDirectCmux && daemonCmux) {
-    const cmux = daemonCmux;
-    const cfg = loadConfig();
-    const deliveries = new Map<string, CaptainDelivery>();
-    // #332 storm BUG 3: captured once at delivery-loop setup. Entries older than
-    // sessionStartMs - STALE_THRESHOLD_MS are silently acked (cursor advanced)
-    // without delivery, mirroring the relay's drain(). This stops a fresh/empty
-    // cursor from re-delivering the entire historical backlog.
-    const sessionStartMs = Date.now();
-
-    // #332 storm BUG (re-entrancy): each tick does multiple slow cmux subprocess
-    // calls and can exceed the 1s interval, so the interval can fire again while
-    // the previous tick is still in-flight. Two overlapping ticks read the SAME
-    // cursor seq and both deliver the entries after it → duplicate/storm
-    // delivery. Mirror the relay's drain() `draining` guard: set on entry, clear
-    // in a finally, skip overlapping fires.
-    let delivering = false;
-
-    const deliveryCore = async () => {
-      const injectedSurfaces = opts.captainSurfaces ?? {};
-      const allProjects = [...new Set([
-        ...Object.keys(cfg.projects ?? {}),
-        ...Object.keys(injectedSurfaces),
-        ...store.listAll().map((t) => t.project),
-      ])];
-
-      for (const project of allProjects) {
-        const projCfg = cfg.projects?.[project];
-        const captainTitle = projCfg?.captainName ?? `${project}-captain`;
-
-        // Try real discovery from cmux.
-        const wsId = cmux.findWorkspaceId ? await cmux.findWorkspaceId(captainTitle) : null;
-        let surface: PaneRef | null = null;
-        let surfacesLength = 0;
-
-        if (wsId) {
-          const surfaces = await cmux.listSurfaces(wsId);
-          surfacesLength = surfaces.length;
-          surface = discoverCaptainSurface(surfaces, captainTitle);
-        }
-
-        // Fall back to injected surface (tests / config-less projects).
-        if (!surface) surface = injectedSurfaces[project] ?? null;
-
-        if (surface) {
-          // Captain found — if previously reaped, un-reap and reset streak so
-          // delivery resumes (a relaunched captain creates a new pane).
-          if (stoppedProjects.has(project)) {
-            stoppedProjects.delete(project);
-            captainMissingStreak.set(project, 0);
-          }
-          captainMissingStreak.set(project, 0);
-        } else {
-          // Streak tracking: surfaces.length > 0 means cmux is reachable but the
-          // captain's pane is provably absent. surfaces.length === 0 means cmux
-          // was unreachable (fail-soft → []), which we treat as "unknown" — never
-          // increment the streak (no false reaping on transient outages).
-          if (surfacesLength > 0) {
-            const streak = (captainMissingStreak.get(project) ?? 0) + 1;
-            captainMissingStreak.set(project, streak);
-            if (streak >= CAPTAIN_GONE_STREAK_K) {
-              // Fire the reap log exactly ONCE on the transition (only the first
-              // absent sweep past K). Do NOT re-fire on subsequent sweeps.
-              if (!stoppedProjects.has(project)) {
-                stoppedProjects.add(project);
-                log(`captain ${captainTitle}: surface gone for ${CAPTAIN_GONE_STREAK_K} sweeps — stopping delivery`);
-              }
-            }
-          }
-          continue;
-        }
-
-        const cursor = await readCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER });
-        const lastAcked = cursor?.lastAckedSeq ?? 0;
-        let d = deliveries.get(project);
-        if (!d) {
-          d = new CaptainDelivery({
-            maxDefers: cfg.relay?.maxDeferDeliveries ?? 300,
-            stableProbePolls: cfg.relay?.stableProbePolls ?? 3,
-          });
-          deliveries.set(project, d);
-        }
-        for await (const entry of readFromCursor({ stateRoot, project, fromSeq: lastAcked + 1 })) {
-          // #332 storm BUG 3: silently ack entries that pre-date this daemon
-          // session by more than STALE_THRESHOLD_MS — leftovers from dead crews
-          // or a prior captain session. Mirrors the relay's drain() skip so a
-          // fresh/empty cursor never re-delivers the historical backlog.
-          if (new Date(entry.ts).getTime() < sessionStartMs - STALE_THRESHOLD_MS) {
-            await writeCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER, lastAckedSeq: entry.seq });
-            continue;
-          }
-          const result = await d.deliver(entry, (text, sendOpts) =>
-            cmux.send(surface!, text, sendOpts),
-          );
-          if ("delivered" in result) {
-            await writeCursor({ stateRoot, project, subscriber: CURSOR_SUBSCRIBER, lastAckedSeq: entry.seq });
-          } else {
-            break;
-          }
-        }
-      }
-    };
-
-    deliveryTick = async () => {
-      if (delivering) return;
-      delivering = true;
-      try {
-        await deliveryCore();
-      } finally {
-        delivering = false;
-      }
-    };
-
     // #332: daemon-direct blocked-crew detection (probe-tick guard is inside
     // createProbes.buildInteractiveProbe so re-entrancy is handled there).
-    probeTick = probes.buildInteractiveProbe({ cmux });
+    probeTick = probes.buildInteractiveProbe({ cmux: daemonCmux });
   }
 
   // #332: production delivery interval (1s poll). Gated on sweepMs so tests
