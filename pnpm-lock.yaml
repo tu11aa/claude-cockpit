@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@cockpit/shared':
+        specifier: workspace:*
+        version: link:packages/shared
       chalk:
         specifier: ^5.4.0
         version: 5.6.2
@@ -33,6 +36,8 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.6(@types/node@22.19.21)
+
+  packages/shared: {}
 
 packages:
 

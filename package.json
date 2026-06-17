@@ -27,6 +27,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@cockpit/shared": "workspace:*",
     "chalk": "^5.4.0",
     "commander": "^13.0.0",
     "gray-matter": "^4.0.3",
