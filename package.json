@@ -8,10 +8,10 @@
     "cockpit": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest",
-    "lint": "tsc --noEmit",
+    "lint": "tsc -b --noEmit || tsc --noEmit",
     "codex:gen-types": "bash scripts/gen-codex-types.sh"
   },
   "keywords": [
@@ -34,7 +34,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }
