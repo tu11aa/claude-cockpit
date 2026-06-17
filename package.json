@@ -28,7 +28,8 @@
   "dependencies": {
     "chalk": "^5.4.0",
     "commander": "^13.0.0",
-    "gray-matter": "^4.0.3"
+    "gray-matter": "^4.0.3",
+    "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
