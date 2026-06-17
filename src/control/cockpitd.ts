@@ -3,10 +3,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn as realSpawn } from "node:child_process";
-import {
-  writeFileSync, mkdirSync, readFileSync, readdirSync, statSync,
-  openSync, readSync, closeSync,
-} from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createStore } from "./store.js";
 import { createDaemon } from "./daemon.js";
@@ -22,7 +19,7 @@ import { createDirectSurfaceLivenessProbe, createDirectCrewPaneReader } from "./
 import { createInteractiveProbe, STALE_THRESHOLD_MS } from "../commands/notify-relay.js";
 import { CaptainDelivery } from "./delivery/captain-delivery.js";
 import { projectHealth, type ComponentHealth } from "./liveness.js";
-import { assembleDaemonSnapshot, type DaemonSnapshotInputs, type ResultArtifacts } from "./snapshot.js";
+import { assembleDaemonSnapshot, type DaemonSnapshotInputs } from "./snapshot.js";
 import { loadConfig } from "@cockpit/shared";
 import { readdir } from "node:fs/promises";
 import type { Gate, TaskRecord, ControlEvent } from "@cockpit/shared";
@@ -33,10 +30,10 @@ import { DaemonCmux } from "./cmux/daemon-cmux.js";
 import { ensureCmuxAutoConfig, type AutoConfigResult } from "@cockpit/shared";
 import { createCmuxDriver } from "../runtimes/index.js";
 import type { AgentDriver, OpencodeBridge, CmuxEventsBridge, DaemonSurfaceDriver } from "./interfaces.js";
+import { distBuiltAt, gatherLogStats, gatherStoreStats, gatherResults } from "./daemon/snapshot-gather.js";
 
-// This module's own compiled file — its mtime is the dist build-time used for
-// the Tier 0 build-freshness check (process start vs build time). package.json
-// (repo root) gives the running version. Both resolved once at load.
+// This module's own compiled file — its mtime is used in readPkgVersion() only.
+// distBuiltAt() now lives in daemon/snapshot-gather.ts.
 const SELF_PATH = fileURLToPath(import.meta.url);
 function readPkgVersion(): string {
   try {
@@ -111,82 +108,6 @@ export interface CockpitdOpts {
    *  inject a fake; in production it runs only when daemonDirectCmux is ON and
    *  not under vitest. See cmux-autoconfig.ts. */
   runCmuxAutoConfig?: () => Promise<AutoConfigResult>;
-}
-
-// ── Tier 0/2 snapshot gathering (I/O at the edge; the pure assembly lives in
-//    snapshot.ts). Each helper tolerates missing files and never throws. ───────
-
-/** mtime (epoch ms) of the running daemon's compiled code, for build-freshness. */
-function distBuiltAt(): number {
-  try { return statSync(SELF_PATH).mtimeMs; } catch { return 0; }
-}
-
-/** Daemon-log error count (last window) + total size. Reads only the tail so a
- *  large log never makes the snapshot tick expensive. */
-function gatherLogStats(path: string, now: number, windowMs: number): DaemonSnapshotInputs["log"] {
-  let sizeBytes = 0;
-  try { sizeBytes = statSync(path).size; }
-  catch { return { errorCount: 0, sizeBytes: 0, windowMs }; }
-  if (sizeBytes === 0) return { errorCount: 0, sizeBytes, windowMs };
-  const CAP = 256 * 1024;
-  const start = Math.max(0, sizeBytes - CAP);
-  const len = sizeBytes - start;
-  let text = "";
-  try {
-    const fd = openSync(path, "r");
-    try {
-      const buf = Buffer.alloc(len);
-      readSync(fd, buf, 0, len, start);
-      text = buf.toString("utf-8");
-    } finally { closeSync(fd); }
-  } catch { return { errorCount: 0, sizeBytes, windowMs }; }
-  const cutoff = now - windowMs;
-  let errorCount = 0;
-  for (const line of text.split("\n")) {
-    if (!/error|failed/i.test(line)) continue;
-    // Lines carry an ISO timestamp ("[cockpitd] 2026-... msg"); skip ones older
-    // than the window. Lines without a parseable timestamp are counted (conservative).
-    const m = line.match(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/);
-    if (m) { const ts = Date.parse(m[0]); if (!Number.isNaN(ts) && ts < cutoff) continue; }
-    errorCount++;
-  }
-  return { errorCount, sizeBytes, windowMs };
-}
-
-/** Per-project store state counts + corrupt/quarantined file count. */
-function gatherStoreStats(
-  store: { list: (p: string) => TaskRecord[] },
-  stateRoot: string,
-  project: string,
-): { byState: Record<string, number>; corruptCount: number } {
-  const byState: Record<string, number> = {};
-  for (const r of store.list(project)) byState[r.state] = (byState[r.state] ?? 0) + 1;
-  let corruptCount = 0;
-  const dir = join(stateRoot, project);
-  try {
-    for (const n of readdirSync(dir)) {
-      if (n.includes(".corrupt.")) { corruptCount++; continue; }
-      if (!n.endsWith(".json")) continue;
-      try { JSON.parse(readFileSync(join(dir, n), "utf-8")); }
-      catch { corruptCount++; }
-    }
-  } catch { /* no project dir yet */ }
-  return { byState, corruptCount };
-}
-
-/** Global _results/ artifact count + total bytes (unbounded-growth watch). */
-function gatherResults(resultsDir: string): ResultArtifacts {
-  let fileCount = 0;
-  let totalBytes = 0;
-  try {
-    for (const n of readdirSync(resultsDir)) {
-      try {
-        const s = statSync(join(resultsDir, n));
-        if (s.isFile()) { fileCount++; totalBytes += s.size; }
-      } catch { /* vanished mid-scan */ }
-    }
-  } catch { /* no results dir */ }
-  return { fileCount, totalBytes };
 }
 
 const CAPTAIN_GONE_STREAK_K = 3;
