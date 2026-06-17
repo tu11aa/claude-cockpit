@@ -147,7 +147,7 @@ export function startDaemon(ctx: DaemonContext, opts: CockpitdOpts, pkgVersion: 
     for (const rec of store.listAll()) {
       if (rec.provider !== "codex" || rec.mode !== "interactive") continue;
       if (TERMINAL_STATES.has(rec.state)) continue;
-      // Mirrors shouldReattachCodex from codex/driver (inlined to avoid importing that module).
+      // Inline of shouldReattachCodex (concrete driver module stays in host).
       const lastAttempt = rec.attempts?.at(-1);
       const last = lastAttempt?.lastHeartbeatAt ?? rec.lastHeartbeat ?? 0;
       if (bootNow - last > REATTACH_STALE_MS) continue;
