@@ -18,7 +18,7 @@ import { readCursor, writeCursor, readFromCursor } from "@cockpit/core";
 import { CaptainDelivery, deliverable } from "@cockpit/core";
 import { sendRequest } from "@cockpit/core";
 import { createInteractiveProbe, STALE_THRESHOLD_MS } from "@cockpit/core";
-import { classifyPaneTail } from "../control/interactive/pane-classifier.js";
+import { classifyPaneTail } from "@cockpit/agents";
 import { createCrewPaneReader, surfaceVerdict, crewPaneTitle } from "@cockpit/core";
 import { cockpitdCall } from "./crew-control.js";
 import type { TaskRecord, ControlEvent } from "@cockpit/shared";
