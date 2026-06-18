@@ -77,7 +77,11 @@ if (process.argv[2] !== "config") {
 // best-effort, never throws; the CLI fails loud later if the socket is unreachable.
 // ensureDaemon resolves its own entrypoint (see launchd.daemonEntryPath) — no
 // path is passed here so no call site can get it wrong.
-ensureDaemon();
+// COCKPIT_DAEMON_SKIP short-circuits this for read-only / CI invocations that must
+// not attempt to boot the daemon (e.g. config-check tests on Linux without launchctl).
+if (!process.env.COCKPIT_DAEMON_SKIP) {
+  ensureDaemon();
+}
 
 const program = new Command();
 
