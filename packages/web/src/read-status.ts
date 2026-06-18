@@ -47,8 +47,8 @@ function buildExcerpt(tasks: TaskRecord[]): string {
 
 export async function readAllStatuses(deps: ReadStatusDeps): Promise<ProjectStatus[]> {
   const listTasks = deps.listTasks ?? (async (project: string) => {
-    const call = deps.call!;
-    const result = await call({ kind: "list", project });
+    if (!deps.call) throw new Error("ReadStatusDeps: call is required when listTasks is not provided");
+    const result = await deps.call({ kind: "list", project });
     return result as TaskRecord[];
   });
 
