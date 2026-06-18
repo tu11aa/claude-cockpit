@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-18
+
+An **architecture release**. Cockpit's flat `src/` is now an internal **six-package workspace monorepo** — `shared · core · agents · workspaces · web · cli` — behind a one-way dependency DAG enforced by TypeScript project references, bundled by tsup into the same single `dist/index.js` (CLI) + `dist/cockpitd.js` (daemon). The public CLI surface is unchanged. This release also lands **daemon-direct cmux delivery** (the notify-relay is off the hot path) and a cluster of daemon/lifecycle bug fixes that surfaced during the cutover.
+
+### Changed
+
+- **Monorepo reorganization (internal, no user-facing change).** The flat `src/` tree and three top-level dirs became six private workspace packages, each with a single responsibility, wired by a `cli` composition root: `@cockpit/shared` (config schema, types, leaf lib), `@cockpit/core` (daemon, state-machine, protocol, and the `AgentDriver`/driver-seam interfaces), `@cockpit/agents` (the AI-driver seam — claude/codex/opencode/gemini), `@cockpit/workspaces` (the environment seam — cmux runtime, obsidian workspace, cmux notifier), `@cockpit/web` (the observability dashboard), and `@cockpit/cli` (commands, bin entry, daemon host). TS project references enforce the one-way DAG (`shared ◄ core ◄ {agents, workspaces, web} ◄ cli`) so `core` can never import a concrete driver or the CLI; adding a new surface or agent is a new folder plus one wiring line. tsup inlines all five library packages into the same two bundled outputs, so the launchd daemon entrypoint and `cockpit` bin are unchanged. (#352, #355, #356, #357, #358, #361, #366, #368)
+
+- **Daemon-direct cmux delivery (`daemonDirectCmux`).** The daemon now delivers crew lifecycle events straight through the cmux runtime/notifier instead of via a separate notify-relay tab, removing a process-lineage wall and a class of relay-tab-death blind spots. (#332, #342, #345, #346, #347, #348, #351)
+
+### Fixed
+
+- **Daemon socket hijack (#360).** `cockpitd` did an unlink-then-bind on the shared socket with no liveness guard, so a second invocation (including a stray CLI) could orphan a live daemon — state reads survived but new connections failed. It now connect-probes any existing socket and **refuses to start if a live daemon answers**, and short-circuits `--help`/`--version` without booting. (#362)
+
+- **Crew-tasks control-plane timeouts = event-loop starvation (#2).** A synchronous `execFileSync` in the cmux driver blocked the daemon's hot path, causing `crew tasks`/`signal`/`spawn` to time out while `status` kept working — and drove constant daemon PID churn. Converted to async `execFile`; the churn is gone. (#365)
+
+- **Config read ENOENT in the bundled CLI (#363).** `package.json` path resolution overshot one directory in the tsup bundle (`cockpit config`/`--version` failed); corrected to resolve relative to the bundled `dist/`. (#365)
+
+- **Codex app-server orphans on daemon stop (#3).** The codex interactive driver now stops its app-server cleanly when the daemon stops, instead of leaving reaped-to-daemon orphans. (#365)
+
+- **Hardcoded crew-worktree base branch (#359).** Crew/side worktrees now derive their base from `git symbolic-ref refs/remotes/origin/HEAD` instead of a hardcoded `develop`, so main-based repos work. (#362)
+
+- **Daemon-direct cutover hardening.** Re-entrancy guard on the delivery+probe loops (#347), three delivery-storm bugs — cursor corrupt-guard, `writeCursor` race, stale-skip (#346) — production construction of `DaemonCmux` when the flag is on (#345), missing ESM `.js` import extensions causing `ERR_MODULE_NOT_FOUND` at runtime (#343), and a `launch` double-run / startup-send confirmation fix under cmux 0.64.16 (#340).
+
+### Added
+
+- **`/where-i-am` (`/wim`) orientation skill.** A quick project-status report for re-orienting at the start of a session. (#364)
+
+### Docs
+
+- Post-reorg documentation refresh: README, `CLAUDE.md`, and `AGENTS.md` now describe the six-package layout; a new current architecture diagram (`docs/diagrams/2026-06-18-cockpit-monorepo-architecture.html`) replaces the pre-reorg overview; and a `docs/README.md` master index was added. Shipped/superseded specs, plans, diagrams, and research were archived (bundled to the hub vault) so the tree carries only active docs — nothing deleted. (#349, #369, #370)
+
 ## [0.7.0] - 2026-06-16
 
 A compatibility release aligning cockpit with **cmux 0.64.16**, headlined by a fix for `cockpit launch --fresh` (broken by cmux's new pinned-workspace protection) and the elimination of cmux's deprecation noise. Introduces an **external-tool compatibility manifest** so dependency drift is caught early, plus first steps toward driver-agnostic crew-lifecycle detection via cmux's native event stream.
