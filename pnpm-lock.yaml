@@ -30,6 +30,9 @@ importers:
       '@cockpit/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@cockpit/workspaces':
+        specifier: workspace:*
+        version: link:packages/workspaces
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.21
@@ -59,6 +62,15 @@ importers:
         version: link:../shared
 
   packages/shared: {}
+
+  packages/workspaces:
+    dependencies:
+      '@cockpit/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cockpit/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 
