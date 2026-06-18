@@ -13,11 +13,9 @@
 // red rollup to its project header); the stale-build / link-lost banners render
 // only when applicable; remediation is COPY-ABLE TEXT (never buttons — read-only
 // beta). Zero new deps: vanilla JS + modern CSS + inline SVG.
-import type { HealthState, ComponentHealth } from "@cockpit/core";
-import { healCmdFor } from "../commands/heal.js";
-import { ageText } from "../commands/health-view.js";
+import type { HealthState, ComponentHealth, DaemonSnapshot } from "@cockpit/core";
+import { healCmdFor, ageText } from "@cockpit/core";
 import type { FullSnapshot } from "./snapshot-merge.js";
-import type { DaemonSnapshot } from "@cockpit/core";
 import type { ExternalProbes, Probe, ProbeState } from "./probes.js";
 
 type AnyState = HealthState | ProbeState;

@@ -1,6 +1,7 @@
 import type { CockpitConfig } from "@cockpit/shared";
 import type { TaskRecord } from "@cockpit/shared";
-import { cockpitdCall } from "../commands/crew-control.js";
+
+export type CockpitdCall = (req: unknown) => Promise<unknown>;
 
 export type DashboardState = "idle" | "busy" | "blocked" | "errored" | "offline" | "unknown";
 
@@ -14,6 +15,7 @@ export interface ProjectStatus {
 
 export interface ReadStatusDeps {
   config: CockpitConfig;
+  call?: CockpitdCall;
   listTasks?: (project: string) => Promise<TaskRecord[]>;
 }
 
@@ -45,7 +47,8 @@ function buildExcerpt(tasks: TaskRecord[]): string {
 
 export async function readAllStatuses(deps: ReadStatusDeps): Promise<ProjectStatus[]> {
   const listTasks = deps.listTasks ?? (async (project: string) => {
-    const result = await cockpitdCall({ kind: "list", project });
+    if (!deps.call) throw new Error("ReadStatusDeps: call is required when listTasks is not provided");
+    const result = await deps.call({ kind: "list", project });
     return result as TaskRecord[];
   });
 

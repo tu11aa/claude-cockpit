@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderHtml, renderContent, renderTickJson } from "../web-render.js";
 import type { FullSnapshot } from "../snapshot-merge.js";
-import type { DaemonSnapshot } from "../../control/snapshot.js";
+import type { DaemonSnapshot } from "@cockpit/core";
 import type { ExternalProbes } from "../probes.js";
 
 const externalHealthy: ExternalProbes = {

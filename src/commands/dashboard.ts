@@ -6,11 +6,15 @@ import chalk from "chalk";
 import { loadConfig } from "@cockpit/shared";
 import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
 import type { PaneRef } from "@cockpit/workspaces";
-import { readAllStatuses } from "../dashboard/read-status.js";
-import { renderDashboard } from "../dashboard/render.js";
-import { syncHub, type SyncHubResult } from "../dashboard/sync-hub.js";
-import { startWebServer } from "../dashboard/web-server.js";
-import { defaultProbeRunners } from "../dashboard/probes.js";
+import {
+  readAllStatuses,
+  renderDashboard,
+  syncHub,
+  startWebServer,
+  defaultProbeRunners,
+} from "@cockpit/web";
+import type { SyncHubResult } from "@cockpit/web";
+import { cockpitdCall } from "./crew-control.js";
 import { resolveCmuxBin } from "@cockpit/shared";
 
 const SOCK = join(homedir(), ".config", "cockpit", "cockpit.sock");
@@ -34,7 +38,7 @@ export async function runDashboardOnce(deps: DashboardOnceDeps = {}): Promise<vo
   const now = (deps.now ?? (() => new Date().toISOString()))();
   const write = deps.write ?? ((s) => process.stdout.write(s));
 
-  const statuses = await readAllStatuses({ config });
+  const statuses = await readAllStatuses({ config, call: cockpitdCall });
   const width = process.stdout.columns ?? 100;
   write(renderDashboard(statuses, { now, width }));
   write("\n");
@@ -47,7 +51,7 @@ export interface SyncHubCliDeps {
 
 export async function runSyncHub(deps: SyncHubCliDeps = {}): Promise<SyncHubResult[]> {
   const config = loadConfig();
-  const statuses = await readAllStatuses({ config });
+  const statuses = await readAllStatuses({ config, call: cockpitdCall });
   return syncHub({ config, statuses, writeFile: deps.writeFile, mkdir: deps.mkdir });
 }
 
