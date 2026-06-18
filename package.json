@@ -1,7 +1,7 @@
 {
   "name": "claude-cockpit",
   "packageManager": "pnpm@10.30.3",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Multi-project agent orchestration for Claude Code",
   "type": "module",
   "bin": {
@@ -51,6 +51,8 @@
     "vitest": "^3.0.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
