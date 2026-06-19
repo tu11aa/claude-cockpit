@@ -18,3 +18,4 @@ export * from "./daemon/delivery.js";
 export * from "./daemon/interactive-probe.js";
 export * from "./delivery/captain-delivery.js";
 export * from "./delivery/defer-delivery.js";
+export * from "./session-freshness.js";
