@@ -3,11 +3,11 @@
 // PURE service-health layer (no I/O, no clock) — the #77 foundation. Mirrors
 // watchdog.ts: every function derives a verdict from records + an explicit `now`
 // so it is fully unit-testable. All runtime probing (cmux reads for captain
-// presence, the relay-heartbeat map) is gathered by the caller (cockpitd) and
-// passed in already-resolved; this module never touches cmux.
+// presence) is gathered by the caller (cockpitd) and passed in already-resolved;
+// this module never touches cmux.
 import type { TaskState, Mode } from "@cockpit/shared";
 
-export type ComponentKind = "relay" | "captain" | "crew" | "command";
+export type ComponentKind = "captain" | "crew" | "command";
 
 // alive  = seen within the stale window (healthy)
 // stale  = quiet past stale but not yet gone (degrading)
@@ -18,29 +18,15 @@ export type HealthState = "alive" | "stale" | "gone" | "unknown";
 export interface ComponentHealth {
   kind: ComponentKind;
   project: string;
-  /** crew name / captain name / "relay" / "command". */
+  /** crew name / captain name / "command". */
   ref: string;
   state: HealthState;
   /** epoch ms of last evidence of life, or null when there is no timestamp
    *  source (captain/command presence is a boolean, not a heartbeat). */
   lastSeenMs: number | null;
-  /** human-facing context — for a down relay, the actionable recovery command. */
+  /** human-facing context — e.g. a recovery command. */
   detail?: string;
 }
-
-/** A notify-relay's registration + last heartbeat, tracked by the daemon. */
-export interface RelayHealth {
-  project: string;
-  pid: number;
-  startedAt: number;
-  lastSeenMs: number;
-}
-
-// Relay heartbeats every ~10s (notify-relay). Stale at ~2.5×, gone at ~6×, so a
-// single missed beat never flaps to "down" but a truly dead relay is caught
-// within one or two daemon sweeps (30s each).
-export const RELAY_STALE_MS = 25_000;
-export const RELAY_GONE_MS = 60_000;
 
 // Crews legitimately idle for long (24h interactive budget), so the surface uses
 // generous windows — these only flag a genuinely dark crew, and #139 already
@@ -68,16 +54,6 @@ export function classifyHealth(
   return "gone";
 }
 
-/**
- * The actionable recovery instruction surfaced when a relay is down. The daemon
- * cannot re-establish a cmux relay tab itself (launchd is outside cmux's
- * process-lineage), so the honest remedy is a captain-run command. Keeping this
- * in the surface is the "never silently blind" guarantee.
- */
-export function relayActionable(project: string): string {
-  return `relay DOWN — run: cockpit launch ${project} (re-establishes the notify-relay tab)`;
-}
-
 const TERMINAL: ReadonlySet<TaskState> = new Set(["done", "failed", "cancelled"]);
 
 /** Minimal crew shape the projection needs (subset of TaskRecord). */
@@ -91,67 +67,39 @@ export interface CrewLiveness {
 
 /**
  * Pure. Project one project's component health from already-gathered inputs.
- * Emits: a relay row, a captain row, a command row (only when applicable), and
- * one row per non-terminal crew.
+ * Emits: a captain row, a command row (only when applicable), and one row per
+ * non-terminal crew.
  *
- * Captain liveness (#239 Phase A): derived from relay heartbeat presence, not a
- * cmux probe. The relay runs inside the captain's process tree (#240) and beats
- * the daemon every ~10s — relay presence IS captain presence.
- *   relay alive/stale → captain ALIVE
- *   relay gone        → captain GONE
- *   no relay          → captain UNKNOWN (no signal; do not alarm)
+ * Captain liveness (#332): driven by the daemon-direct delivery loop.
+ *   captainStopped === false  → captain surface was found on last delivery tick → ALIVE
+ *   captainStopped === true   → surface gone for 3+ consecutive ticks → GONE
+ *   captainStopped === null   → not yet checked / cmux unreachable → UNKNOWN
  */
 export function projectHealth(input: {
   project: string;
   now: number;
   captainName: string;
-  relay: RelayHealth | null;
+  /** Delivery-loop captain surface state. See docs above. */
+  captainStopped: boolean | null;
   /** true/false when a command workspace is expected; null = not applicable. */
   commandPresent: boolean | null;
   crews: CrewLiveness[];
 }): ComponentHealth[] {
-  const { project, now, captainName, relay, commandPresent, crews } = input;
+  const { project, now, captainName, captainStopped, commandPresent, crews } = input;
   const out: ComponentHealth[] = [];
 
-  // ── relay ──────────────────────────────────────────────────────────────
-  if (relay) {
-    const state = classifyHealth(relay.lastSeenMs, now, RELAY_STALE_MS, RELAY_GONE_MS);
-    out.push({
-      kind: "relay",
-      project,
-      ref: "relay",
-      state,
-      lastSeenMs: relay.lastSeenMs,
-      detail: state === "alive" ? `pid ${relay.pid}` : relayActionable(project),
-    });
-  } else {
-    // No relay registered. Without the cmux probe (denied from launchd, #239)
-    // we cannot distinguish "captain alive but relay dead" from "nothing
-    // running" — report unknown rather than falsely alarm.
-    out.push({
-      kind: "relay",
-      project,
-      ref: "relay",
-      state: "unknown",
-      lastSeenMs: null,
-    });
-  }
-
   // ── captain ────────────────────────────────────────────────────────────
-  // Relay heartbeat is the liveness signal (#239 Phase A). relay.lastSeenMs
-  // surfaces as the captain's last-seen timestamp so consumers can show age.
-  const captainState: HealthState = !relay
-    ? "unknown"
-    : classifyHealth(relay.lastSeenMs, now, RELAY_STALE_MS, RELAY_GONE_MS) === "gone"
-      ? "gone"
-      : "alive";
+  const captainState: HealthState =
+    captainStopped === true ? "gone" :
+    captainStopped === false ? "alive" :
+    "unknown";
   out.push({
     kind: "captain",
     project,
     ref: captainName,
     state: captainState,
-    lastSeenMs: relay?.lastSeenMs ?? null,
-    detail: captainState === "gone" ? "captain presumed gone — relay heartbeat dark" : undefined,
+    lastSeenMs: null,
+    detail: captainState === "gone" ? "captain surface gone — delivery stopped" : undefined,
   });
 
   // ── command (on-demand; only surfaced when applicable) ───────────────────
@@ -199,16 +147,11 @@ export function ageText(lastSeenMs: number | null, now: number): string {
 /**
  * Pure. Return the heal command string for a component that needs remediation,
  * or null when no action is needed (or when no heal verb exists for this kind).
- *
- * Relay idempotency rule (#240): the captain-owned 'relay supervise' process
- * is the PRIMARY relay lifecycle manager. 'cockpit heal relay' is the MANUAL
- * fallback for when NO supervised relay is running (captain wedged/dead). To
- * avoid competing with a partially-degraded but still-supervised relay, we
- * only spawn on 'gone' or 'unknown' — never on 'alive' or 'stale'.
  */
 export function healCmdFor(c: ComponentHealth): string | null {
-  if (c.kind === "relay" && (c.state === "gone" || c.state === "unknown")) {
-    return `cockpit heal relay --project ${c.project}`;
-  }
+  // No heal verb for captain/crew — daemon-direct delivery handles recovery automatically.
   return null;
 }
+
+/** Per-project relay health — REMOVED (#332). No longer tracked by daemon. */
+export type RelayHealth = never;
