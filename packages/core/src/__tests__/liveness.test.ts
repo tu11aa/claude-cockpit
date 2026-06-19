@@ -1,8 +1,6 @@
 // packages/core/src/__tests__/liveness.test.ts
 //
-// Unit tests for the pure liveness helpers relocated from src/commands/
-// into @cockpit/core. These tests run in the core package so the functions
-// have a stable, import-path-verified home before the dashboard move.
+// Unit tests for the pure liveness helpers in @cockpit/core.
 import { describe, it, expect } from "vitest";
 import { ageText, healCmdFor } from "../liveness.js";
 import type { ComponentHealth } from "../liveness.js";
@@ -35,35 +33,32 @@ describe("ageText", () => {
 
 // ── healCmdFor ───────────────────────────────────────────────────────────────
 
-function makeRelay(state: ComponentHealth["state"], project = "brove"): ComponentHealth {
-  return { kind: "relay", project, ref: "relay", state, lastSeenMs: null };
-}
-function makeCaptain(state: ComponentHealth["state"]): ComponentHealth {
-  return { kind: "captain", project: "brove", ref: "brove-captain", state, lastSeenMs: null };
+function makeCaptain(state: ComponentHealth["state"], project = "brove"): ComponentHealth {
+  return { kind: "captain", project, ref: `${project}-captain`, state, lastSeenMs: null };
 }
 function makeCrew(state: ComponentHealth["state"]): ComponentHealth {
   return { kind: "crew", project: "brove", ref: "worker-1", state, lastSeenMs: null };
 }
 
 describe("healCmdFor", () => {
-  it("returns heal relay cmd for a gone relay", () => {
-    expect(healCmdFor(makeRelay("gone", "brove"))).toBe("cockpit heal relay --project brove");
-  });
-
-  it("returns heal relay cmd for an unknown relay", () => {
-    expect(healCmdFor(makeRelay("unknown", "scaffold"))).toBe("cockpit heal relay --project scaffold");
-  });
-
-  it("returns null for an alive relay", () => {
-    expect(healCmdFor(makeRelay("alive"))).toBeNull();
-  });
-
-  it("returns null for a stale relay", () => {
-    expect(healCmdFor(makeRelay("stale"))).toBeNull();
-  });
-
-  it("returns null for non-relay components (no heal verb exists)", () => {
+  it("returns null for a gone captain (no heal verb exists)", () => {
     expect(healCmdFor(makeCaptain("gone"))).toBeNull();
+  });
+
+  it("returns null for an unknown captain", () => {
+    expect(healCmdFor(makeCaptain("unknown"))).toBeNull();
+  });
+
+  it("returns null for an alive captain", () => {
+    expect(healCmdFor(makeCaptain("alive"))).toBeNull();
+  });
+
+  it("returns null for a stale captain", () => {
+    expect(healCmdFor(makeCaptain("stale"))).toBeNull();
+  });
+
+  it("returns null for crew (no heal verb exists)", () => {
     expect(healCmdFor(makeCrew("gone"))).toBeNull();
+    expect(healCmdFor(makeCrew("unknown"))).toBeNull();
   });
 });
