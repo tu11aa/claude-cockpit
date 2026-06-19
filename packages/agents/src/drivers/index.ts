@@ -3,6 +3,7 @@ export { createCodexDriver } from "./codex.js";
 export { createGeminiDriver } from "./gemini.js";
 export { createOpencodeDriver } from "./opencode.js";
 export { CapabilityRegistry } from "./registry.js";
+export { buildAgentCmd } from "./launch-cmd.js";
 export type {
   AgentDriver,
   AgentCapability,
