@@ -45,7 +45,7 @@ async function isCaptainAlive(project: string): Promise<boolean> {
   }
 }
 
-/** Poll the daemon health endpoint until the target project's relay is up,
+/** Poll the daemon health endpoint until the target project's captain is up,
  *  or the hard timeout expires. Returns true if warmup succeeded. */
 export async function waitForWarmup(
   project: string,
@@ -95,7 +95,7 @@ export async function runGroupDispatch(opts: GroupDispatchOpts): Promise<TaskRec
     );
   }
 
-  // Ensure B's captain/relay is up
+  // Ensure B's captain is up
   const alive = await isCaptainAlive(opts.toProject);
   if (!alive) {
     try {

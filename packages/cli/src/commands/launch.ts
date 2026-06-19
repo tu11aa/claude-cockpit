@@ -12,7 +12,6 @@ import { RuntimeRegistry, createCmuxDriver, createObsidianDriver, WorkspaceRegis
 import type { RuntimeDriver } from "@cockpit/workspaces";
 import { ensureSpokeLayout } from "@cockpit/shared";
 import { resolveCmuxBin } from "@cockpit/shared";
-import { buildRelaySupervisorCommand, NOTIFY_RELAY_TAB_TITLE } from "../control/relay-supervisor.js";
 import { CMUX_TIMEOUT, classifyStartupSurface } from "@cockpit/workspaces";
 
 const CMUX_APP = "/Applications/cmux.app";
@@ -178,11 +177,6 @@ function buildAgentCmd(
     promptFile: fs.existsSync(roleFile) ? roleFile : undefined,
   });
 }
-
-// Relay-tab builders moved to src/control/relay-supervisor.ts (shared with the
-// daemon's #207 healer). Re-exported for back-compat (launch.test.ts imports
-// them from "../launch").
-export { buildRelaySupervisorCommand, NOTIFY_RELAY_TAB_TITLE };
 
 export interface StartupDeliveryOptions {
   /** Max time to wait for the surface to leave the cold-init splash. */

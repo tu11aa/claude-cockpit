@@ -5,7 +5,6 @@
 //
 // Subcommands:
 //   heal status  — dry-run: print unhealthy components + the exact heal command
-//   heal relay   — re-establish the notify-relay (lineage-safe, idempotent)
 //   heal daemon  — restart cockpitd via the existing launchd kickstart path
 //
 // DEFERRED: heal crew <id> — re-attach a stuck crew task (overlaps #100, more
@@ -13,8 +12,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { queryHealth } from "./health-view.js";
-import { createRelayHealer, healCmdFor } from "@cockpit/core";
-import type { RelayHealOutcome } from "@cockpit/core";
+import { healCmdFor } from "@cockpit/core";
 import { ensureDaemon as _ensureDaemon } from "@cockpit/core";
 import type { ComponentHealth, HealthState } from "@cockpit/core";
 
@@ -109,57 +107,6 @@ export async function runHealStatus(opts: HealStatusOpts): Promise<number> {
   return 2;
 }
 
-export interface HealRelayOpts {
-  project: string;
-  queryHealth: typeof queryHealth;
-  relayHealer: (project: string) => Promise<RelayHealOutcome | void>;
-  stdout: NodeJS.WritableStream;
-  stderr: NodeJS.WritableStream;
-}
-
-/** Returns exit code: 0=success/already-healthy, 1=error */
-export async function runHealRelay(opts: HealRelayOpts): Promise<number> {
-  const { project, stdout, stderr } = opts;
-  let rows: ComponentHealth[] | null;
-  try {
-    rows = await opts.queryHealth(project);
-  } catch (e) {
-    stderr.write(`heal relay: ${(e as Error).message}\n`);
-    return 1;
-  }
-
-  if (rows === null) {
-    stderr.write("daemon unreachable — start the daemon first (cockpit heal daemon)\n");
-    return 1;
-  }
-
-  const relay = rows.find((c) => c.kind === "relay" && c.project === project);
-  const state = relay?.state ?? "unknown";
-
-  // Strict idempotency: 'alive' or 'stale' means a heartbeat was recently
-  // received, so the #240-supervised relay is functioning or recovering.
-  // Do not compete with the captain's supervisor in that window.
-  if (state === "alive" || state === "stale") {
-    stdout.write(chalk.green(`✔ relay for '${project}' already healthy (${state}) — no action taken\n`));
-    return 0;
-  }
-
-  // 'gone' or 'unknown': no supervised relay is running; spawn manually.
-  stdout.write(`relay for '${project}' is ${state} — re-establishing...\n`);
-  try {
-    await opts.relayHealer(project);
-    stdout.write(chalk.green(`✔ relay re-establish attempted for '${project}'\n`));
-    // TODO(#240): if the captain's harness-wake fires in this same window, a
-    // second relay could briefly start (two relays draining the mailbox →
-    // duplicate deliveries). Acceptable in MVP; revisit when #240 adds a relay
-    // presence check before waking.
-    return 0;
-  } catch (e) {
-    stderr.write(`heal relay failed: ${(e as Error).message}\n`);
-    return 1;
-  }
-}
-
 export interface HealDaemonOpts {
   ensureDaemon: () => void;
   stdout: NodeJS.WritableStream;
@@ -183,7 +130,7 @@ export async function runHealDaemon(opts: HealDaemonOpts): Promise<number> {
 // ── Commander command tree ────────────────────────────────────────────────────
 
 export const healCommand = new Command("heal")
-  .description("Targeted, idempotent remediation for cockpit components (relay, daemon)")
+  .description("Targeted, idempotent remediation for cockpit components (daemon, health)")
   .addHelpText("after", "\nDeferred: 'cockpit heal crew <id>' (re-attach) — see issue #100.")
   .addCommand(
     new Command("status")
@@ -195,28 +142,6 @@ export const healCommand = new Command("heal")
           project: opts.project,
           json: opts.json ?? false,
           queryHealth,
-          stdout: process.stdout,
-          stderr: process.stderr,
-        });
-        process.exit(code);
-      }),
-  )
-  .addCommand(
-    new Command("relay")
-      .description(
-        "Re-establish the notify-relay for a project (lineage-safe, idempotent).\n" +
-        "No-op when relay is alive or stale — the #240 captain-owned supervisor is the primary path;\n" +
-        "this is the manual fallback for when no supervised relay is running.",
-      )
-      .argument("<project>", "project to re-establish the relay for")
-      .option("-p, --project <project>", "alias for the positional project argument")
-      .action(async (positional: string, opts: { project?: string }) => {
-        const project = opts.project ?? positional;
-        const healer = createRelayHealer((m) => process.stdout.write(m + "\n"));
-        const code = await runHealRelay({
-          project,
-          queryHealth,
-          relayHealer: healer,
           stdout: process.stdout,
           stderr: process.stderr,
         });

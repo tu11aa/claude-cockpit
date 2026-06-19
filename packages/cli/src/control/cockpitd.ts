@@ -9,7 +9,6 @@ import { buildContext } from "@cockpit/core";
 import { createAttach } from "@cockpit/core";
 import { startDaemon } from "@cockpit/core";
 import { isDaemonSocketLive } from "@cockpit/core";
-import { createRelayHealer } from "@cockpit/core";
 export type { CockpitdOpts } from "@cockpit/core";
 export { defaultIsPidAlive } from "@cockpit/core";
 export { discoverCaptainSurface } from "@cockpit/core";
@@ -18,7 +17,7 @@ import type { PaneRef } from "@cockpit/shared";
 import { runHeadless, CodexInteractiveDriver, OpencodeSseBridge } from "@cockpit/agents";
 import { CmuxEventsBridge, DaemonCmux } from "@cockpit/workspaces";
 import { loadConfig, TERMINAL_STATES } from "@cockpit/shared";
-import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
+import { createCmuxDriver } from "@cockpit/workspaces";
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 function readPkgVersion(): string {
@@ -98,11 +97,8 @@ export function startCockpitd(opts: import("@cockpit/core").CockpitdOpts = {}) {
   ctx.cmuxEventsBridge = cmuxEventsBridge;
 
   // ── daemonCmux resolution ─────────────────────────────────────────────────
-  const daemonDirectCmux = opts.daemonDirectCmux ?? loadConfig().defaults?.daemonDirectCmux ?? false;
-  const daemonCmux = opts.daemonCmux
-    ?? (daemonDirectCmux ? (opts.makeDaemonCmux ?? (() => new DaemonCmux(createCmuxDriver())))() : undefined);
-  ctx.daemonDirectCmux = daemonDirectCmux;
-  ctx.daemonCmux = daemonCmux;
+  ctx.daemonCmux = opts.daemonCmux
+    ?? (opts.makeDaemonCmux ?? (() => new DaemonCmux(createCmuxDriver())))();
 
   // ── launchHeadless default ────────────────────────────────────────────────
   // Kept here so this file is the sole importer of headless-launcher (daemon/* can't).
@@ -121,13 +117,7 @@ export function startCockpitd(opts: import("@cockpit/core").CockpitdOpts = {}) {
     }
   });
 
-  const healRelay = opts.healRelay ?? createRelayHealer(log, (project, config) => {
-    const proj = config.projects[project];
-    if (!proj) return null;
-    return new RuntimeRegistry({ cmux: createCmuxDriver() }).forProject(project, config);
-  });
-
-  return startDaemon(ctx, { ...opts, launchHeadless, healRelay }, PKG_VERSION);
+  return startDaemon(ctx, { ...opts, launchHeadless }, PKG_VERSION);
 }
 
 // Executed by launchd (ProgramArguments → this file's compiled .js).
