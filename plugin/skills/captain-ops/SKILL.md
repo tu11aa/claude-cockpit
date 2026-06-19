@@ -28,15 +28,7 @@ The handoff file is auto-deleted after reading. Use this as your primary context
 ~/.config/cockpit/scripts/wiki-query.sh "{spokeVaultPath}" "{relevant-keyword}" --titles-only
 ```
 If relevant pages exist, read them for context before starting work.
-8. **Own your relay (#240):** If `defaults.daemonDirectCmux` is ON in cockpit config, skip `relay supervise` — the daemon owns notification delivery directly (#332). Otherwise, launch the notify-relay supervisor as a `run_in_background` process on session start:
-   ```bash
-   cockpit relay supervise <project> --as captain
-   ```
-   The supervisor handles boot-race retry in-process (3s backoff) and returns once the relay is booted; after that the relay runs on its own setInterval timers. Whole-process death (crash / SIGTERM / captain restart) is recovered by the `run_in_background` harness — when it reports the process exited, relaunch it with brief backoff.
-
-   **Why this closes the tab-death gap:** Previously the relay ran in a separate cmux tab (`✉ notify-relay`) that could be killed independently, leaving the captain silently blind to crew events. Now it is a single PID inside the captain's process tree. The loop only retries the boot race (which is the most common exit of the relay); post-boot crashes are handled by the harness relaunch because the relay's own drain/probe intervals catch their errors internally and never throw out of the process.
-
-   **Secondary seam:** The daemon healer (`createRelayHealer` in relay-healer.ts) remains the secondary recovery path (#207) — it tries to re-spawn the relay tab on sweep, but cmux lineage enforcement means it mostly logs from launchd. The primary recovery is the captain's `run_in_background` ownership.
+8. Crew lifecycle events (done / blocked / idle) are delivered to your captain pane automatically by the cockpit daemon via daemon-direct cmux delivery (#332). No relay setup required.
 
 9. (Opt-in) Status writes are not required on every event. Only run `~/.config/cockpit/scripts/write-status.sh` when you have a meaningful note worth recording (a blocker, a deliberate "starting work on X", etc.) — not on a schedule.
 
@@ -187,10 +179,10 @@ To add, edit, or remove routing rules: use the `cockpit:add-pick-crew-rule` skil
 
 ## Task Coordination
 
-**HARD RULE: Do NOT poll crew screens in a loop.** Crew lifecycle events (idle / done / blocked) arrive via the **notify-relay** automatically — trust the relay signal. Polling loops hang indefinitely, exhaust context, and mask real blockers.
+**HARD RULE: Do NOT poll crew screens in a loop.** Crew lifecycle events (idle / done / blocked) are delivered to your captain pane automatically by the cockpit daemon — trust the daemon signal. Polling loops hang indefinitely, exhaust context, and mask real blockers.
 
 You don't have an Agent Team or `TaskCreate`/`TaskUpdate` tools — those were Claude-specific. When you need crew status:
-1. **Wait for the relay to notify you.** When a crew finishes, signals blocked, or goes idle, the notify-relay delivers the event to your captain pane. This is the primary mechanism — do not replace it with polling.
+1. **Wait for the daemon to notify you.** When a crew finishes, signals blocked, or goes idle, the daemon delivers the event to your captain pane via daemon-direct cmux delivery. This is the primary mechanism — do not replace it with polling.
 2. `cockpit crew read <project> <name>` — **on-demand spot-check only** (a single read when you have a specific reason, e.g. reviewing a finished diff). Never in a loop, never with `until`.
 3. `cockpit crew tasks <project>` — **on-demand** compact task listing; `--id <prefix>` to filter; `--state-only <id>` for a single-word state check.
 4. `cockpit crew list <project>` — see all live crews and pick the right one.
@@ -212,7 +204,7 @@ On CREW IDLE, do a **single on-demand spot-check** (allowed — not a polling lo
 |-----------------|----------------|
 | Completed work (PR opened, commits pushed, results reported) but no CREW DONE | Treat as the #278 case — review; if good, terminalize (`merge` + `crew close`). If not actually done, **re-task**: send the next instruction via `crew send` (the #148 re-open flow). |
 | Crew asked a question or is waiting for a decision | Respond via `crew send`. Do NOT terminalize — it will signal done after the next turn. |
-| Still mid-task / transient idle | Leave it; wait for the next relay event. |
+| Still mid-task / transient idle | Leave it; wait for the next daemon event. |
 
 **Do not re-send the original task** if the crew appears to have completed it — that triggers a duplicate run. Read the crew screen or diff first, then decide: terminalize vs re-task vs leave.
 
@@ -272,17 +264,17 @@ If your config has `group` / `groupRole`:
 
 ## Cross-Project Delegation
 
-When a task genuinely belongs to a sibling project in the same group, use **`cockpit group dispatch <to-project> '<task>'`** instead of hand-writing a message. This records a tracked task on the sibling's project and auto-wakes its captain via the existing mailbox/relay.
+When a task genuinely belongs to a sibling project in the same group, use **`cockpit group dispatch <to-project> '<task>'`** instead of hand-writing a message. This records a tracked task on the sibling's project and auto-wakes its captain via the mailbox.
 
 ### Rules
 
 1. **Same-group only.** `group dispatch` rejects any target whose `group` field differs from yours. Cross-group dispatch is out of scope — use claude-mem / wiki queries for awareness.
 2. **`acceptDelegations`.** If the sibling's project config has `acceptDelegations: false`, the command rejects with a clear error. The default is `true`.
-3. **Boot-if-down.** If the sibling's captain workspace / notify-relay are not running, `group dispatch` boots them (`cockpit launch <project>`) and waits for warmup with a bounded poll (30s hard timeout). If warmup fails, the dispatch is rejected (task not recorded).
+3. **Boot-if-down.** If the sibling's captain workspace is not running, `group dispatch` boots it (`cockpit launch <project>`) and waits for warmup with a bounded poll (30s hard timeout). If warmup fails, the dispatch is rejected (task not recorded).
 
 ### Dispatch-and-yield (do NOT poll)
 
-Once the task is recorded to the daemon, `group dispatch` **returns immediately**. The sibling's captain auto-accepts (because `acceptDelegations` is true) and spawns a crew. When the task settles — done, blocked, or failed — the daemon fans the outcome back to **your** mailbox automatically. Your relay wakes you up. **You never poll the sibling.**
+Once the task is recorded to the daemon, `group dispatch` **returns immediately**. The sibling's captain auto-accepts (because `acceptDelegations` is true) and spawns a crew. When the task settles — done, blocked, or failed — the daemon fans the outcome back to **your** mailbox automatically. The daemon wakes you up. **You never poll the sibling.**
 
 HARD RULE: Do NOT add a polling loop after `group dispatch`. The report-back is event-driven; trust it.
 
