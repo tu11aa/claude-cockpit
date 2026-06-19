@@ -4,17 +4,6 @@ import type { ControlEvent, TaskRecord, TaskState } from "@cockpit/shared";
 import { TERMINAL_STATES } from "@cockpit/shared";
 import { reduce } from "./state-machine.js";
 import { evaluateStall, recoverStall } from "./watchdog.js";
-import { classifyHealth, RELAY_STALE_MS, RELAY_GONE_MS, type RelayHealth } from "./liveness.js";
-
-/**
- * Result of a relay-heal attempt (audit STEP 3). "captain-absent" tells the
- * sweep the captain workspace is permanently gone — the relay can never be
- * healed, so its health record is pruned to stop per-cycle "captain workspace
- * not present" log spam. Any other value (or void, for legacy impls) leaves the
- * record in place so the liveness surface keeps reporting it.
- */
-export type RelayHealOutcome = "captain-absent" | "healed" | "skipped";
-
 export interface DaemonDeps {
   store: Store;
   now: () => number;
@@ -66,16 +55,6 @@ export interface DaemonDeps {
     record: TaskRecord;
     event: ControlEvent;
   }) => Promise<void> | void;
-  /**
-   * #207 relay heal (SECONDARY — best-effort). Called once per "down" episode
-   * when the sweep finds a registered relay gone dark. The default impl
-   * (cockpitd) attempts a `spawnInjector` re-spawn, but is mostly inert in prod:
-   * the launchd daemon is outside cmux's process-lineage and cannot inject. The
-   * non-negotiable guarantee — "captain never SILENTLY blind" — is delivered by
-   * getRelayHealth() + the liveness surface, not by this hook. Errors are
-   * swallowed by the sweep so a refused cmux write never trips the daemon.
-   */
-  healRelay?: (project: string) => Promise<RelayHealOutcome | void> | RelayHealOutcome | void;
   /**
    * #225 hard crew task-timeout: wall-clock ceiling in ms. When a non-terminal
    * task's age (now - createdAt) exceeds this, the sweep fires a CREW TIMEOUT
@@ -133,8 +112,17 @@ function formatMessage(rec: TaskRecord, event?: ControlEvent): string | null {
       return `CREW BLOCKED ${tag}: ${(rec.question ?? "(no question)").trim()}`;
     case "failed":
       return `CREW FAILED ${tag}: ${(rec.error ?? "(no error)").trim()}`;
-    case "stalled":
+    case "stalled": {
+      // #354: a hung interactive tool call reads differently from a headless
+      // heartbeat stall — name the tool and how long it has been outstanding,
+      // and frame it as "possibly hung" (recoverable, auto-clears on the tool's
+      // PostToolUse), NOT a death notice.
+      if (event?.type === "task.stalled" && event.tool) {
+        const mins = event.elapsedMs != null ? Math.max(1, Math.round(event.elapsedMs / 60000)) : null;
+        return `CREW STALLED ${tag}: still running ${event.tool}${mins != null ? ` ~${mins}min` : ""} — possibly hung (no result yet).`;
+      }
       return `CREW STALLED ${tag}: no heartbeat in ${rec.heartbeatBudgetMs}ms`;
+    }
     case "awaiting-input":
       return `CREW IDLE ${tag}: turn ended / awaiting your input — review and reply or close.`;
     default:
@@ -144,7 +132,7 @@ function formatMessage(rec: TaskRecord, event?: ControlEvent): string | null {
 
 /** #246: cross-project delegation report-back message. Called when a task
  *  with originProject settles to a terminal state. Returns a captain-facing
- *  one-liner that the origin's relay delivers verbatim. */
+ *  one-liner delivered verbatim to the origin project's captain. */
 function formatDelegationReport(rec: TaskRecord, originProject: string, targetProject: string): string | null {
   const shortTask = (rec.task ?? "").split(/\r?\n/)[0]?.trim().slice(0, 120) ?? "";
   switch (rec.state) {
@@ -228,7 +216,7 @@ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
   "task.session", "task.turn.started", "task.turn.completed",
   "task.delta", "task.input.requested", "task.approval.requested",
   "task.reattached", "task.reopened",
-  "task.stalled", "task.idle", "task.timeout", "task.reconcile-failed",
+  "task.stalled", "task.idle", "task.quiet", "task.timeout", "task.reconcile-failed",
   "task.cancelled", "task.session.ended",
 ]);
 
@@ -239,34 +227,11 @@ export function createDaemon(deps: DaemonDeps) {
   // active back-and-forth. Bounded by the live task set; never read after a
   // task terminates (terminal states don't transition to awaiting-input).
   const lastCaptainTurnAt = new Map<string, number>();
-  // #207: per-project relay registration + last heartbeat. The relay registers
-  // over the socket on boot and beats every ~10s; the sweep health-checks these.
-  const relayHealth = new Map<string, RelayHealth>();
-  // Per-project last heal attempt, so a persistently-dark relay is healed once
-  // per episode, not every 30s sweep. Re-armed (deleted) when a fresh heartbeat
-  // proves the relay recovered.
-  const lastHealAttempt = new Map<string, number>();
+  // #354: per-task debounce for CREW QUIET. Keyed to the liveness timestamp of
+  // the quiet episode so exactly one QUIET fires per episode; when the crew shows
+  // activity again, liveness advances and a later quiet episode re-notifies.
+  const quietNotifiedAt = new Map<string, number>();
   return {
-    /** #207: a notify-relay announced itself (boot). */
-    registerRelay(r: { project: string; pid: number; startedAt: number }): void {
-      relayHealth.set(r.project, { ...r, lastSeenMs: now() });
-      lastHealAttempt.delete(r.project);
-    },
-    /** #207: a notify-relay heartbeat (every ~10s). Re-arms heal. */
-    relayHeartbeat(r: { project: string; pid: number }): void {
-      const prev = relayHealth.get(r.project);
-      relayHealth.set(r.project, {
-        project: r.project,
-        pid: r.pid,
-        startedAt: prev?.startedAt ?? now(),
-        lastSeenMs: now(),
-      });
-      lastHealAttempt.delete(r.project);
-    },
-    /** #207/#77: snapshot of every registered relay's health (for the surface). */
-    getRelayHealth(): RelayHealth[] {
-      return [...relayHealth.values()];
-    },
     async handle(req: Req): Promise<TaskRecord | TaskRecord[]> {
       switch (req.kind) {
         case "dispatch": {
@@ -421,49 +386,51 @@ export function createDaemon(deps: DaemonDeps) {
             continue;
           }
         }
+        // #354: evaluateStall now only stalls a HEADLESS heartbeat timeout or a
+        // hung INTERACTIVE tool call (PreToolUse with no PostToolUse past the
+        // tool-stall budget). A quiet interactive thinking turn no longer stalls
+        // here — it is surfaced as CREW QUIET below, keeping the crew `working`.
         const idle = evaluateStall(r, t);
         if (idle) {
           store.put(idle);
-          // Interactive idle → awaiting-input (task.idle); headless → stalled
-          // (task.stalled). The synth event only carries the notify payload;
-          // the reducer treats both as no-ops (state already updated above).
-          const synthEvent: ControlEvent =
-            idle.state === "awaiting-input"
-              ? { type: "task.idle", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs }
-              : { type: "task.stalled", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs };
+          // The synth event only carries the notify payload; the reducer treats
+          // it as a no-op (state already updated above). A hung-tool stall carries
+          // the tool name + elapsed so the notifier renders the accurate message.
+          const synthEvent: ControlEvent = idle.pendingTool
+            ? { type: "task.stalled", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs, tool: idle.pendingTool.name, elapsedMs: t - idle.pendingTool.since }
+            : { type: "task.stalled", id: r.id, heartbeatBudgetMs: r.heartbeatBudgetMs };
           firePush(deps, r.project, r.state, idle, synthEvent, lastCaptainTurnAt.get(r.id));
           continue;
         }
+        // #354 CREW QUIET: a `working` interactive crew quiet past its heartbeat
+        // budget with NO tool in flight is alive but deep-thinking (no hook fires
+        // during pure model thinking). Surface a distinct, non-alarming nudge —
+        // NOT 'awaiting-input' (the turn never ended; real CREW IDLE comes only
+        // from the Stop hook). State stays `working`; notify once per episode.
+        if (r.mode === "interactive" && r.state === "working" && !r.pendingTool) {
+          const liveness = r.attempts.at(-1)?.lastHeartbeatAt ?? r.lastHeartbeat;
+          const quiet = t - liveness;
+          if (quiet > r.heartbeatBudgetMs) {
+            if (deps.notify && quietNotifiedAt.get(r.id) !== liveness) {
+              quietNotifiedAt.set(r.id, liveness);
+              const tag = `[${r.provider}/${r.name != null ? r.name : shortId(r.id)}]`;
+              const mins = Math.max(1, Math.round(quiet / 60000));
+              const message = `CREW QUIET ${tag}: working ~${mins}min with no tool activity — likely deep thinking (no reply expected yet).`;
+              const synthEvent: ControlEvent = { type: "task.quiet", id: r.id, quietMs: quiet };
+              try {
+                const p = deps.notify({ project: r.project, message, record: r, event: synthEvent });
+                if (p && typeof (p as Promise<void>).catch === "function") (p as Promise<void>).catch(() => {});
+              } catch { /* swallowed — a flaky notifier must never trip the sweep */ }
+            }
+            continue;
+          }
+        }
+        // Activity resumed (or never went quiet) → drop any QUIET debounce marker
+        // so the next genuine quiet episode notifies again, and avoid map growth.
+        if (quietNotifiedAt.has(r.id)) quietNotifiedAt.delete(r.id);
         const recovered = recoverStall(r, t);
         // recoverStall does NOT check heartbeat freshness — guard per its contract
         if (recovered && t - r.lastHeartbeat <= r.heartbeatBudgetMs) store.put(recovered);
-      }
-      // #207 relay health-check: a registered relay gone dark past the gone
-      // window is down. Best-effort heal, debounced to once per episode. The
-      // surface (getRelayHealth) already exposes the "gone" state regardless —
-      // that is the never-silently-blind guarantee; heal is the secondary try.
-      if (deps.healRelay) {
-        // Snapshot first: a "captain-absent" prune deletes from relayHealth mid-loop.
-        for (const rh of [...relayHealth.values()]) {
-          if (classifyHealth(rh.lastSeenMs, t, RELAY_STALE_MS, RELAY_GONE_MS) !== "gone") continue;
-          const last = lastHealAttempt.get(rh.project);
-          if (last != null && t - last <= RELAY_GONE_MS) continue; // debounce
-          lastHealAttempt.set(rh.project, t);
-          try {
-            const outcome = await deps.healRelay(rh.project);
-            // audit STEP 3 stale-ref prune: the captain workspace is permanently
-            // gone, so this relay can never be healed and re-probing it every
-            // sweep just spams "captain workspace not present". Drop the record
-            // (and its debounce) so the loop goes quiet after a single attempt; a
-            // captain restart re-registers a fresh relay via registerRelay.
-            if (outcome === "captain-absent") {
-              relayHealth.delete(rh.project);
-              lastHealAttempt.delete(rh.project);
-            }
-          } catch {
-            // best-effort — a refused cmux write (lineage) must not trip the sweep
-          }
-        }
       }
     },
     async reconcile(): Promise<void> {
