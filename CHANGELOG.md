@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-19
+
+A **post-reorg cleanup** patch. The public CLI surface is unchanged.
+
+### Removed
+
+- **notify-relay fully deleted** — daemon-direct cmux delivery is now unconditional (the relay proxy hop is gone). Captain-gone detection moved to projectHealth (stoppedProjects/captainMissingStreak). (#332, #373)
+
+### Added
+
+- **Semantic crew heartbeat** — the watchdog now distinguishes three states instead of one overloaded idle pulse: **CREW IDLE** (real turn-end, Stop hook only), **CREW QUIET** (alive but deep-thinking; stays `working`, no false 'awaiting-input'), and **CREW STALLED** (a tool call in flight past TOOL_STALL_BUDGET_MS=10min — a recoverable 'possibly hung' warn that auto-clears on the tool's PostToolUse). Degrades to QUIET-only for opencode/codex. (#354, #375)
+
+### Changed
+
+- **Thin-wrapper refactor** — `launch.ts` (446→210) and `crew.ts` (804→510) now push orchestration logic into @cockpit/core / @cockpit/agents / @cockpit/workspaces (session-freshness, buildAgentCmd, crew-protocol incl. the #278 completion-protocol with an exact-string snapshot guard, crew-lifecycle reap, cmux-readiness, pane helpers), each unit-testable without spawning processes. (#367, #374, #376)
+
+### Docs
+
+- Refreshed docs/testing/crew-lifecycle-checklist.md for the relay deletion + the new CREW QUIET/STALLED model. (#377)
+
 ## [0.8.0] - 2026-06-18
 
 An **architecture release**. Cockpit's flat `src/` is now an internal **six-package workspace monorepo** — `shared · core · agents · workspaces · web · cli` — behind a one-way dependency DAG enforced by TypeScript project references, bundled by tsup into the same single `dist/index.js` (CLI) + `dist/cockpitd.js` (daemon). The public CLI surface is unchanged. This release also lands **daemon-direct cmux delivery** (the notify-relay is off the hot path) and a cluster of daemon/lifecycle bug fixes that surfaced during the cutover.
