@@ -1,9 +1,9 @@
 import { Command } from "commander";
 import chalk from "chalk";
-import { loadConfig } from "@cockpit/shared";
-import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
-import type { RuntimeDriver } from "@cockpit/workspaces";
-import type { CockpitConfig } from "@cockpit/shared";
+import { loadConfig } from "@squadrant/shared";
+import { createCmuxDriver, RuntimeRegistry } from "@squadrant/workspaces";
+import type { RuntimeDriver } from "@squadrant/workspaces";
+import type { CockpitConfig } from "@squadrant/shared";
 
 function buildRegistry(): RuntimeRegistry {
   return new RuntimeRegistry({

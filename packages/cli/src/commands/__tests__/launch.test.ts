@@ -16,15 +16,15 @@ vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
 }));
 
-vi.mock("@cockpit/shared", async () => {
-  const actual = await vi.importActual<typeof import("@cockpit/shared")>("@cockpit/shared");
+vi.mock("@squadrant/shared", async () => {
+  const actual = await vi.importActual<typeof import("@squadrant/shared")>("@squadrant/shared");
   return { ...actual, resolveCmuxBin: () => "/Applications/cmux.app/Contents/Resources/bin/cmux", resetCmuxBinCache: vi.fn() };
 });
 
-import { cmuxLocal } from "@cockpit/workspaces";
+import { cmuxLocal } from "@squadrant/workspaces";
 import { deliverStartupPrompt } from "../launch.js";
 
-describe("cmuxLocal (@cockpit/workspaces direct-cmux helper)", () => {
+describe("cmuxLocal (@squadrant/workspaces direct-cmux helper)", () => {
   beforeEach(() => {
     execFileMock.mockReset();
   });

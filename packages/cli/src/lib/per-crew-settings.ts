@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { mergeClaudeHooks } from "@cockpit/agents";
+import { mergeClaudeHooks } from "@squadrant/agents";
 
 /**
  * Bash permission allowlist for crews running under `--permission-mode

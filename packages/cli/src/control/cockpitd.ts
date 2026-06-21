@@ -5,19 +5,19 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
-import { buildContext } from "@cockpit/core";
-import { createAttach } from "@cockpit/core";
-import { startDaemon } from "@cockpit/core";
-import { isDaemonSocketLive } from "@cockpit/core";
-export type { CockpitdOpts } from "@cockpit/core";
-export { defaultIsPidAlive } from "@cockpit/core";
-export { discoverCaptainSurface } from "@cockpit/core";
-import type { AttachFrame } from "@cockpit/core";
-import type { PaneRef } from "@cockpit/shared";
-import { runHeadless, CodexInteractiveDriver, OpencodeSseBridge } from "@cockpit/agents";
-import { CmuxEventsBridge, DaemonCmux } from "@cockpit/workspaces";
-import { loadConfig, TERMINAL_STATES } from "@cockpit/shared";
-import { createCmuxDriver } from "@cockpit/workspaces";
+import { buildContext } from "@squadrant/core";
+import { createAttach } from "@squadrant/core";
+import { startDaemon } from "@squadrant/core";
+import { isDaemonSocketLive } from "@squadrant/core";
+export type { CockpitdOpts } from "@squadrant/core";
+export { defaultIsPidAlive } from "@squadrant/core";
+export { discoverCaptainSurface } from "@squadrant/core";
+import type { AttachFrame } from "@squadrant/core";
+import type { PaneRef } from "@squadrant/shared";
+import { runHeadless, CodexInteractiveDriver, OpencodeSseBridge } from "@squadrant/agents";
+import { CmuxEventsBridge, DaemonCmux } from "@squadrant/workspaces";
+import { loadConfig, TERMINAL_STATES } from "@squadrant/shared";
+import { createCmuxDriver } from "@squadrant/workspaces";
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 function readPkgVersion(): string {
@@ -30,7 +30,7 @@ const PKG_VERSION = readPkgVersion();
 
 export type ListSurfacesFn = (wsId: string) => Promise<PaneRef[]>;
 
-export function startCockpitd(opts: import("@cockpit/core").CockpitdOpts = {}) {
+export function startCockpitd(opts: import("@squadrant/core").CockpitdOpts = {}) {
   const ctx = buildContext(opts);
   const { stateRoot, store, log, spawn, writeResult, inFlightHeadlessIds, activeHeadlessKills } = ctx;
 
@@ -103,7 +103,7 @@ export function startCockpitd(opts: import("@cockpit/core").CockpitdOpts = {}) {
   // ── launchHeadless default ────────────────────────────────────────────────
   // Kept here so this file is the sole importer of headless-launcher (daemon/* can't).
   const launchHeadless = opts.launchHeadless ?? (async (rec) => {
-    const ingest = (e: import("@cockpit/shared").ControlEvent) =>
+    const ingest = (e: import("@squadrant/shared").ControlEvent) =>
       void ctx.d.handle({ kind: "event", project: rec.project, event: e });
     const handle = runHeadless({
       provider: rec.provider, task: rec.task, id: rec.id, sessionId: rec.sessionId,

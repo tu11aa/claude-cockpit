@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { startCockpitd } from "../cockpitd.js";
-import { sendRequest } from "@cockpit/core";
+import { sendRequest } from "@squadrant/core";
 
 describe("cockpitd headless wiring", () => {
   let stop: (() => void) | undefined; let dir: string;

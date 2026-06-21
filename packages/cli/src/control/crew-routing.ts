@@ -1,4 +1,4 @@
-import type { CockpitConfig } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
 
 export interface CrewRouteResult {
   agent: string;

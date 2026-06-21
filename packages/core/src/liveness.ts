@@ -5,7 +5,7 @@
 // so it is fully unit-testable. All runtime probing (cmux reads for captain
 // presence) is gathered by the caller (cockpitd) and passed in already-resolved;
 // this module never touches cmux.
-import type { TaskState, Mode } from "@cockpit/shared";
+import type { TaskState, Mode } from "@squadrant/shared";
 
 export type ComponentKind = "captain" | "crew" | "command";
 

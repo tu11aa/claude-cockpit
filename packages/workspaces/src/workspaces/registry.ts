@@ -1,9 +1,9 @@
-import { resolveHome, type CockpitConfig } from "@cockpit/shared";
+import { resolveHome, type CockpitConfig } from "@squadrant/shared";
 import type {
   WorkspaceDriver,
   WorkspaceFactory,
   WorkspaceProbeResult,
-} from "@cockpit/shared";
+} from "@squadrant/shared";
 
 const DEFAULT_WORKSPACE = "obsidian";
 

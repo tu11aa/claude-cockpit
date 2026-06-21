@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSync, readFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCockpitd, discoverCaptainSurface } from "../cockpitd.js";
-import { appendToMailbox, writeCursor, readCursor } from "@cockpit/core";
-import { STALE_THRESHOLD_MS } from "@cockpit/core";
-import { sendRequest } from "@cockpit/core";
-import { crewPaneTitle } from "@cockpit/core";
-import type { DaemonCmux } from "@cockpit/workspaces";
-import type { PaneRef } from "@cockpit/shared";
-import type { TaskRecord, ControlEvent } from "@cockpit/shared";
+import { appendToMailbox, writeCursor, readCursor } from "@squadrant/core";
+import { STALE_THRESHOLD_MS } from "@squadrant/core";
+import { sendRequest } from "@squadrant/core";
+import { crewPaneTitle } from "@squadrant/core";
+import type { DaemonCmux } from "@squadrant/workspaces";
+import type { PaneRef } from "@squadrant/shared";
+import type { TaskRecord, ControlEvent } from "@squadrant/shared";
 
 const TASK: TaskRecord = {
   id: "t1", project: "p", provider: "claude", mode: "interactive",

@@ -10,7 +10,7 @@ const listSurfaces = vi.hoisted(() => vi.fn());
 const status = vi.hoisted(() => vi.fn());
 const buildCommand = vi.hoisted(() => vi.fn());
 
-vi.mock("@cockpit/workspaces", () => ({
+vi.mock("@squadrant/workspaces", () => ({
   createCmuxDriver: () => ({
     name: "cmux",
     probe: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock("@cockpit/workspaces", () => ({
     async probeAll() { return {}; }
   },
   // side.ts + crew.ts (dynamically imported by regression test) pull these from
-  // @cockpit/workspaces after the crew.ts thin-wrapper refactor (#367). Every
+  // @squadrant/workspaces after the crew.ts thin-wrapper refactor (#367). Every
   // symbol either file imports must be declared here or the import resolves to
   // undefined and calls throw at runtime.
   resolveCaptainWorkspace: async (project: string) => {
@@ -66,8 +66,8 @@ const addWorktreeMock = vi.hoisted(() => vi.fn());
 const removeWorktreeMock = vi.hoisted(() => vi.fn());
 const worktreePathMock = vi.hoisted(() => vi.fn());
 const resolveWorktreeBaseMock = vi.hoisted(() => vi.fn().mockReturnValue("develop"));
-vi.mock("@cockpit/shared", async () => {
-  const actual = await vi.importActual<typeof import("@cockpit/shared")>("@cockpit/shared");
+vi.mock("@squadrant/shared", async () => {
+  const actual = await vi.importActual<typeof import("@squadrant/shared")>("@squadrant/shared");
   return { ...actual, loadConfig, resolveHome: (p: string) => p, addWorktree: addWorktreeMock, removeWorktree: removeWorktreeMock, worktreePath: worktreePathMock, resolveWorktreeBase: resolveWorktreeBaseMock };
 });
 
@@ -78,7 +78,7 @@ const claudeDriver = vi.hoisted(() => ({
   buildCommand,
 }));
 
-vi.mock("@cockpit/agents", () => ({
+vi.mock("@squadrant/agents", () => ({
   createClaudeDriver: () => claudeDriver,
   createCodexDriver: () => ({ ...claudeDriver, name: "codex", templateSuffix: "generic" }),
   createGeminiDriver: () => ({ ...claudeDriver, name: "gemini", templateSuffix: "generic" }),

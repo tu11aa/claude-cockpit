@@ -13,7 +13,7 @@ import { createServer } from "./server.js";
 import { rotateIfNeeded, mailboxStats, readCursor } from "../mailbox.js";
 import { projectHealth, type ComponentHealth } from "../liveness.js";
 import type { DaemonSnapshotInputs } from "../snapshot.js";
-import { loadConfig, TERMINAL_STATES, ensureCmuxAutoConfig } from "@cockpit/shared";
+import { loadConfig, TERMINAL_STATES, ensureCmuxAutoConfig } from "@squadrant/shared";
 import { distBuiltAt, gatherLogStats, gatherStoreStats, gatherResults } from "./snapshot-gather.js";
 import type { CockpitdOpts, DaemonContext } from "./context.js";
 
@@ -42,7 +42,7 @@ export function startDaemon(ctx: DaemonContext, opts: CockpitdOpts, pkgVersion: 
   const notify = opts.notify ?? defaultNotify;
   const surfaceProbe = buildSurfaceProbe(ctx, probes, daemonCmux);
 
-  const ingest = (project: string) => (e: import("@cockpit/shared").ControlEvent) =>
+  const ingest = (project: string) => (e: import("@squadrant/shared").ControlEvent) =>
     void ctx.d.handle({ kind: "event", project, event: e });
 
   const d = createDaemon({

@@ -3,25 +3,25 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import chalk from "chalk";
-import { loadConfig } from "@cockpit/shared";
-import { addWorktree, removeWorktree, resolveWorktreeBase, resolveTextInput, TERMINAL_STATES } from "@cockpit/shared";
-import type { TaskRecord } from "@cockpit/shared";
+import { loadConfig } from "@squadrant/shared";
+import { addWorktree, removeWorktree, resolveWorktreeBase, resolveTextInput, TERMINAL_STATES } from "@squadrant/shared";
+import type { TaskRecord } from "@squadrant/shared";
 import { resolveCrewRoute } from "../control/crew-routing.js";
-import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
-import { listProjectCrews, findCrew, resolveCaptainWorkspace, sendFirstTurnWhenReady, getFreePort } from "@cockpit/workspaces";
-import type { PaneRef, PanePlacement, RuntimeDriver } from "@cockpit/workspaces";
+import { createCmuxDriver, RuntimeRegistry } from "@squadrant/workspaces";
+import { listProjectCrews, findCrew, resolveCaptainWorkspace, sendFirstTurnWhenReady, getFreePort } from "@squadrant/workspaces";
+import type { PaneRef, PanePlacement, RuntimeDriver } from "@squadrant/workspaces";
 import {
   createClaudeDriver,
   createCodexDriver,
   createGeminiDriver,
   createOpencodeDriver,
   CapabilityRegistry,
-} from "@cockpit/agents";
+} from "@squadrant/agents";
 import { buildDispatchRequest, cockpitdCall, sendCodexFirstTurn } from "./crew-control.js";
 import { tailLines } from "./crew-output.js";
 import { writePerCrewSettingsLocal, writePerCrewOpencodeConfig } from "../lib/per-crew-settings.js";
-import { buildCompletionProtocol, shellQuote, titleFor, nameFromTitle, nextAutoName, reapCrewChildren } from "@cockpit/core";
-import type { TurnAcceptanceConfig } from "@cockpit/core";
+import { buildCompletionProtocol, shellQuote, titleFor, nameFromTitle, nextAutoName, reapCrewChildren } from "@squadrant/core";
+import type { TurnAcceptanceConfig } from "@squadrant/core";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 

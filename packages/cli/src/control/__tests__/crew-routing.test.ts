@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveCrewRoute } from "../crew-routing.js";
-import type { CockpitConfig } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
 
 function makeConfig(overrides?: Partial<CockpitConfig["defaults"]>): CockpitConfig {
   return {
@@ -90,7 +90,7 @@ describe("resolveCrewRoute", () => {
 });
 
 // Regression: shipped default ruleset ordering (extreme → hard → mobile → daily)
-import { getDefaultConfig } from "@cockpit/shared";
+import { getDefaultConfig } from "@squadrant/shared";
 
 describe("resolveCrewRoute — shipped default config ordering", () => {
   it("'implement mobile feature' resolves to hard/claude/sonnet, not mobile/codex (hard rule precedes mobile in default ruleset)", () => {

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCockpitd } from "../cockpitd.js";
-import { sendRequest } from "@cockpit/core";
+import { sendRequest } from "@squadrant/core";
 
 describe("integration: interactive-codex restart-reattach (closes #86 interactive slice)", () => {
   let stop: (() => void) | undefined; let dir: string;

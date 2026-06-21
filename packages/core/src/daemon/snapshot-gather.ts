@@ -7,7 +7,7 @@ import {
   statSync, openSync, readSync, closeSync, readdirSync, readFileSync,
 } from "node:fs";
 import type { DaemonSnapshotInputs, ResultArtifacts } from "../snapshot.js";
-import type { TaskRecord } from "@cockpit/shared";
+import type { TaskRecord } from "@squadrant/shared";
 
 // The compiled snapshot-gather.js shares the dist/ build time with cockpitd.js
 // (tsup compiles all entries in the same pass), so its mtime == dist build-time.

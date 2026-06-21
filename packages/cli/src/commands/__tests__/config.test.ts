@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runConfigCheck } from "../config.js";
-import { getDefaultConfig } from "@cockpit/shared";
+import { getDefaultConfig } from "@squadrant/shared";
 
 const __thisDir = dirname(fileURLToPath(import.meta.url));
 // Built CLI lives at <repo>/dist/index.js — five levels up from packages/cli/src/commands/__tests__/

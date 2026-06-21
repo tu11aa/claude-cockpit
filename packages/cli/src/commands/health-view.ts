@@ -6,9 +6,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
-import { sendRequest, ageText } from "@cockpit/core";
-export { ageText } from "@cockpit/core";
-import type { ComponentHealth, HealthState } from "@cockpit/core";
+import { sendRequest, ageText } from "@squadrant/core";
+export { ageText } from "@squadrant/core";
+import type { ComponentHealth, HealthState } from "@squadrant/core";
 
 const SOCK = join(homedir(), ".config", "cockpit", "cockpit.sock");
 

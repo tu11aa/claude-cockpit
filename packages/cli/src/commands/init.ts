@@ -9,9 +9,9 @@ import {
   saveConfig,
   DEFAULT_CONFIG_PATH,
   resolveHome,
-} from "@cockpit/shared";
-import { createObsidianDriver, WorkspaceRegistry } from "@cockpit/workspaces";
-import { ensureRuntimeSynced } from "@cockpit/shared";
+} from "@squadrant/shared";
+import { createObsidianDriver, WorkspaceRegistry } from "@squadrant/workspaces";
+import { ensureRuntimeSynced } from "@squadrant/shared";
 
 function findPackageRoot(): string {
   let dir = path.dirname(new URL(import.meta.url).pathname);

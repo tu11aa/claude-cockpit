@@ -4,10 +4,10 @@ import fs from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
-import { loadConfig } from "@cockpit/shared";
-import { compatManifest, type ToolEntry } from "@cockpit/shared";
-import { checkToolCompat } from "@cockpit/shared";
-import { createCmuxDriver, RuntimeRegistry, createCmuxNotifier, NotifierRegistry, createObsidianDriver, WorkspaceRegistry } from "@cockpit/workspaces";
+import { loadConfig } from "@squadrant/shared";
+import { compatManifest, type ToolEntry } from "@squadrant/shared";
+import { checkToolCompat } from "@squadrant/shared";
+import { createCmuxDriver, RuntimeRegistry, createCmuxNotifier, NotifierRegistry, createObsidianDriver, WorkspaceRegistry } from "@squadrant/workspaces";
 import { queryHealth, printServiceHealth } from "./health-view.js";
 import {
   createCursorEmitter,
@@ -15,7 +15,7 @@ import {
   createGeminiEmitter,
   createOpencodeEmitter,
   ProjectionRegistry,
-} from "@cockpit/agents";
+} from "@squadrant/agents";
 
 function commandExists(cmd: string): boolean {
   try {
@@ -247,7 +247,7 @@ export const doctorCommand = new Command("doctor")
     // --- Agent Probes ---
     console.log(chalk.bold("\nAgent Drivers\n"));
 
-    const { createClaudeDriver, createCodexDriver, createGeminiDriver, createOpencodeDriver, CapabilityRegistry } = await import("@cockpit/agents");
+    const { createClaudeDriver, createCodexDriver, createGeminiDriver, createOpencodeDriver, CapabilityRegistry } = await import("@squadrant/agents");
 
     const agentDrivers = {
       claude: createClaudeDriver(),

@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import os from "node:os";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { readUserLevelSource, readProjectLevelSource } from "@cockpit/shared";
-import { createObsidianDriver } from "@cockpit/workspaces";
-import type { WorkspaceDriver } from "@cockpit/shared";
+import { readUserLevelSource, readProjectLevelSource } from "@squadrant/shared";
+import { createObsidianDriver } from "@squadrant/workspaces";
+import type { WorkspaceDriver } from "@squadrant/shared";
 
 function memDriver(files: Record<string, string>): WorkspaceDriver {
   return {

@@ -1,5 +1,5 @@
-import { loadConfig } from "@cockpit/shared";
-import type { RuntimeDriver, CockpitConfig, TaskRecord } from "@cockpit/shared";
+import { loadConfig } from "@squadrant/shared";
+import type { RuntimeDriver, CockpitConfig, TaskRecord } from "@squadrant/shared";
 import type { DirectCmuxReader } from "./interfaces.js";
 
 const TAIL_LINES = 25;

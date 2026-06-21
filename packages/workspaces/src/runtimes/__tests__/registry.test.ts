@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { RuntimeRegistry } from "../registry.js";
 import type { RuntimeDriver } from "../types.js";
-import type { CockpitConfig } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
 
 function stubDriver(name: string): RuntimeDriver {
   return {

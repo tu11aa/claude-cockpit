@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import matter from "gray-matter";
-import { loadConfig, resolveHome, type ProjectConfig, type CockpitConfig } from "@cockpit/shared";
+import { loadConfig, resolveHome, type ProjectConfig, type CockpitConfig } from "@squadrant/shared";
 import {
   readDailyLog,
   parseSection,
@@ -12,8 +12,8 @@ import {
   enumerateDays,
   iso,
   daysAgo,
-} from "@cockpit/shared";
-import { createObsidianDriver, WorkspaceRegistry } from "@cockpit/workspaces";
+} from "@squadrant/shared";
+import { createObsidianDriver, WorkspaceRegistry } from "@squadrant/workspaces";
 
 interface StatusFrontmatter {
   tasks_total?: number;

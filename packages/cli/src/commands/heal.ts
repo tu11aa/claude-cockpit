@@ -12,9 +12,9 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { queryHealth } from "./health-view.js";
-import { healCmdFor } from "@cockpit/core";
-import { ensureDaemon as _ensureDaemon } from "@cockpit/core";
-import type { ComponentHealth, HealthState } from "@cockpit/core";
+import { healCmdFor } from "@squadrant/core";
+import { ensureDaemon as _ensureDaemon } from "@squadrant/core";
+import type { ComponentHealth, HealthState } from "@squadrant/core";
 
 // ── pure helpers (fully unit-testable, no I/O) ────────────────────────────────
 

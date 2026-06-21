@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { sendFirstTurnWhenReady } from "../crew-pane.js";
-import type { PaneRef } from "@cockpit/shared";
+import type { PaneRef } from "@squadrant/shared";
 
 describe("sendFirstTurnWhenReady", () => {
   let readPaneScreen: ReturnType<typeof vi.fn>;

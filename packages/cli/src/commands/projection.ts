@@ -3,7 +3,7 @@ import chalk from "chalk";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "@cockpit/shared";
+import { loadConfig } from "@squadrant/shared";
 import {
   createCursorEmitter,
   createCodexEmitter,
@@ -12,13 +12,13 @@ import {
   ProjectionRegistry,
   type ProjectionEmitter,
   type ProjectionSource,
-} from "@cockpit/agents";
-import { createObsidianDriver } from "@cockpit/workspaces";
-import type { WorkspaceDriver } from "@cockpit/shared";
+} from "@squadrant/agents";
+import { createObsidianDriver } from "@squadrant/workspaces";
+import type { WorkspaceDriver } from "@squadrant/shared";
 import {
   readUserLevelSource,
   readProjectLevelSource,
-} from "@cockpit/shared";
+} from "@squadrant/shared";
 
 type Opts = {
   scope?: "user" | "project";

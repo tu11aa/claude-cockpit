@@ -3,12 +3,12 @@
 // they are unit-testable with a mock RuntimeDriver.
 
 import net from "node:net";
-import { loadConfig } from "@cockpit/shared";
-import type { PaneRef, RuntimeDriver } from "@cockpit/shared";
+import { loadConfig } from "@squadrant/shared";
+import type { PaneRef, RuntimeDriver } from "@squadrant/shared";
 import { RuntimeRegistry } from "./runtimes/registry.js";
 import { createCmuxDriver } from "./runtimes/cmux.js";
-import { titleFor, isCrewTitle, isTurnAccepted } from "@cockpit/core";
-import type { TurnAcceptanceConfig } from "@cockpit/core";
+import { titleFor, isCrewTitle, isTurnAccepted } from "@squadrant/core";
+import type { TurnAcceptanceConfig } from "@squadrant/core";
 
 // Poll-based first-turn delivery timing constants.
 const SEND_FIRST_TURN_FLOOR_MS = 1500;

@@ -3,19 +3,19 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import chalk from "chalk";
-import { loadConfig } from "@cockpit/shared";
-import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
-import type { PaneRef, PanePlacement } from "@cockpit/workspaces";
+import { loadConfig } from "@squadrant/shared";
+import { createCmuxDriver, RuntimeRegistry } from "@squadrant/workspaces";
+import type { PaneRef, PanePlacement } from "@squadrant/workspaces";
 import {
   createClaudeDriver,
   createCodexDriver,
   createGeminiDriver,
   createOpencodeDriver,
   CapabilityRegistry,
-} from "@cockpit/agents";
-import { resolveCaptainWorkspace, sendFirstTurnWhenReady } from "@cockpit/workspaces";
-import { resolveTextInput } from "@cockpit/shared";
-import { addWorktree, removeWorktree, worktreePath, resolveWorktreeBase } from "@cockpit/shared";
+} from "@squadrant/agents";
+import { resolveCaptainWorkspace, sendFirstTurnWhenReady } from "@squadrant/workspaces";
+import { resolveTextInput } from "@squadrant/shared";
+import { addWorktree, removeWorktree, worktreePath, resolveWorktreeBase } from "@squadrant/shared";
 
 const TEMPLATES_DIR = path.join(os.homedir(), ".config", "cockpit", "templates");
 

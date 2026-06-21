@@ -9,10 +9,10 @@ import { spawn as realSpawn } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { createStore } from "../store.js";
 import { createDaemon } from "../daemon.js";
-import { loadConfig } from "@cockpit/shared";
-import type { TaskRecord, ControlEvent, Gate, AutoConfigResult } from "@cockpit/shared";
+import { loadConfig } from "@squadrant/shared";
+import type { TaskRecord, ControlEvent, Gate, AutoConfigResult } from "@squadrant/shared";
 import type { Socket } from "node:net";
-import type { PaneRef } from "@cockpit/shared";
+import type { PaneRef } from "@squadrant/shared";
 import type { AgentDriver, OpencodeBridge, CmuxEventsBridge, DaemonSurfaceDriver } from "../interfaces.js";
 import type { AttachFrame } from "../protocol.js";
 

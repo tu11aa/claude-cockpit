@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCockpitd } from "../cockpitd.js";
-import { sendRequest } from "@cockpit/core";
+import { sendRequest } from "@squadrant/core";
 
 describe("cockpitd claude interactive wiring", () => {
   let stop: (() => Promise<void>) | undefined;

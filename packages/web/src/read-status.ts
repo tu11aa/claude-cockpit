@@ -1,5 +1,5 @@
-import type { CockpitConfig } from "@cockpit/shared";
-import type { TaskRecord } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
+import type { TaskRecord } from "@squadrant/shared";
 
 export type CockpitdCall = (req: unknown) => Promise<unknown>;
 

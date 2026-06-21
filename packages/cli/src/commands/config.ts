@@ -3,9 +3,9 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import chalk from "chalk";
-import { DEFAULT_CONFIG_PATH, getDefaultConfig, type CockpitConfig } from "@cockpit/shared";
-import { detectDrift, applySafeFixes, type DriftItem } from "@cockpit/shared";
-import { withStamp } from "@cockpit/shared";
+import { DEFAULT_CONFIG_PATH, getDefaultConfig, type CockpitConfig } from "@squadrant/shared";
+import { detectDrift, applySafeFixes, type DriftItem } from "@squadrant/shared";
+import { withStamp } from "@squadrant/shared";
 
 export interface ConfigCheckOptions {
   configPath: string;

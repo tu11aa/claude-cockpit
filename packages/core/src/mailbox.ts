@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { TaskRecord, ControlEvent } from "@cockpit/shared";
+import type { TaskRecord, ControlEvent } from "@squadrant/shared";
 
 export interface MailboxEntry {
   seq: number;

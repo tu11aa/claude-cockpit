@@ -1,6 +1,6 @@
 // src/control/state-machine.ts
-import type { ControlEvent, TaskRecord, DispatchAttempt } from "@cockpit/shared";
-import { TERMINAL_STATES } from "@cockpit/shared";
+import type { ControlEvent, TaskRecord, DispatchAttempt } from "@squadrant/shared";
+import { TERMINAL_STATES } from "@squadrant/shared";
 
 /**
  * Pure helper: merges `patch` into the last attempt and updates lastHeartbeatAt.

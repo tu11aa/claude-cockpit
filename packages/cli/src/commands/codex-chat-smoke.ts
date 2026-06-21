@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { AppServerClient } from "@cockpit/agents";
+import { AppServerClient } from "@squadrant/agents";
 import { resolve } from "node:path";
 
 export const codexChatSmokeCommand = new Command("codex-chat-smoke")

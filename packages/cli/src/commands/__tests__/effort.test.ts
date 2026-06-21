@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { getDefaultConfig, saveConfig } from "@cockpit/shared";
-import type { CockpitConfig, ProjectConfig } from "@cockpit/shared";
+import { getDefaultConfig, saveConfig } from "@squadrant/shared";
+import type { CockpitConfig, ProjectConfig } from "@squadrant/shared";
 import { runEffortGet, runEffortSet, notifyCaptainsOfEffort } from "../effort.js";
 
 let dir: string;

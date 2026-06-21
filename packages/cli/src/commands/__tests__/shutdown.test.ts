@@ -6,14 +6,14 @@ const cockpitdCall = vi.hoisted(() => vi.fn());
 vi.mock("../crew-control.js", () => ({ cockpitdCall }));
 
 const loadConfig = vi.hoisted(() => vi.fn());
-vi.mock("@cockpit/shared", async () => {
-  const actual = await vi.importActual<typeof import("@cockpit/shared")>("@cockpit/shared");
+vi.mock("@squadrant/shared", async () => {
+  const actual = await vi.importActual<typeof import("@squadrant/shared")>("@squadrant/shared");
   return { ...actual, loadConfig, resolveHome: (p: string) => p };
 });
 
 const stopMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const listMock = vi.hoisted(() => vi.fn());
-vi.mock("@cockpit/workspaces", () => ({
+vi.mock("@squadrant/workspaces", () => ({
   createCmuxDriver: () => ({}),
   RuntimeRegistry: class {
     forProject() { return { list: listMock, stop: stopMock }; }

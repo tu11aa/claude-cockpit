@@ -8,7 +8,7 @@ import {
   runExternalProbes,
   type ProbeRunners,
 } from "../probes.js";
-import type { CockpitConfig } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
 
 function cfg(over: Partial<CockpitConfig> = {}): CockpitConfig {
   return {

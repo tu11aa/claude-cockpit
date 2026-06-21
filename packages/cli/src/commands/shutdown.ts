@@ -1,11 +1,11 @@
 import { Command } from "commander";
 import chalk from "chalk";
-import { loadConfig } from "@cockpit/shared";
-import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
-import type { RuntimeDriver } from "@cockpit/workspaces";
+import { loadConfig } from "@squadrant/shared";
+import { createCmuxDriver, RuntimeRegistry } from "@squadrant/workspaces";
+import type { RuntimeDriver } from "@squadrant/workspaces";
 import { cockpitdCall } from "./crew-control.js";
-import type { TaskRecord } from "@cockpit/shared";
-import { TERMINAL_STATES } from "@cockpit/shared";
+import type { TaskRecord } from "@squadrant/shared";
+import { TERMINAL_STATES } from "@squadrant/shared";
 
 // Captain workspaces gained the leading "⚓ " prefix partway through cockpit's
 // life. Workspaces created before that convention persist with the un-prefixed

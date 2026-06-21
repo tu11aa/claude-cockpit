@@ -3,19 +3,19 @@ import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
-import { loadConfig } from "@cockpit/shared";
-import { createCmuxDriver, RuntimeRegistry } from "@cockpit/workspaces";
-import type { PaneRef } from "@cockpit/workspaces";
+import { loadConfig } from "@squadrant/shared";
+import { createCmuxDriver, RuntimeRegistry } from "@squadrant/workspaces";
+import type { PaneRef } from "@squadrant/workspaces";
 import {
   readAllStatuses,
   renderDashboard,
   syncHub,
   startWebServer,
   defaultProbeRunners,
-} from "@cockpit/web";
-import type { SyncHubResult } from "@cockpit/web";
+} from "@squadrant/web";
+import type { SyncHubResult } from "@squadrant/web";
 import { cockpitdCall } from "./crew-control.js";
-import { resolveCmuxBin } from "@cockpit/shared";
+import { resolveCmuxBin } from "@squadrant/shared";
 
 const SOCK = join(homedir(), ".config", "cockpit", "cockpit.sock");
 

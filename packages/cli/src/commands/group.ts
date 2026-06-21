@@ -11,9 +11,9 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
-import { loadConfig, resolveHome, type CockpitConfig } from "@cockpit/shared";
-import { sendRequest } from "@cockpit/core";
-import type { TaskRecord, Provider, Mode } from "@cockpit/shared";
+import { loadConfig, resolveHome, type CockpitConfig } from "@squadrant/shared";
+import { sendRequest } from "@squadrant/core";
+import type { TaskRecord, Provider, Mode } from "@squadrant/shared";
 
 const SOCK = join(homedir(), ".config", "cockpit", "cockpit.sock");
 // #288: 30s was too short — cold captain boot + relay supervisor startup takes

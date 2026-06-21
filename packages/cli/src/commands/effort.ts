@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
-import { loadConfig, saveConfig, resolveEffort, DEFAULT_CONFIG_PATH } from "@cockpit/shared";
-import type { CockpitConfig, Effort } from "@cockpit/shared";
+import { loadConfig, saveConfig, resolveEffort, DEFAULT_CONFIG_PATH } from "@squadrant/shared";
+import type { CockpitConfig, Effort } from "@squadrant/shared";
 
 const VALID_EFFORTS: Effort[] = ["max", "balance", "low"];
 
@@ -105,7 +105,7 @@ export const effortCommand = new Command("effort")
     // Best-effort active notify: send a one-line notice to any running captain.
     // Never hard-fails — config is already written above.
     try {
-      const { createCmuxDriver, RuntimeRegistry } = await import("@cockpit/workspaces");
+      const { createCmuxDriver, RuntimeRegistry } = await import("@squadrant/workspaces");
       const config = loadConfig();
       const registry = new RuntimeRegistry({ cmux: createCmuxDriver() });
       const driver = registry.global(config);

@@ -1,6 +1,6 @@
 // src/config.test.ts
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getDefaultConfig, loadConfig, saveConfig } from "@cockpit/shared";
+import { getDefaultConfig, loadConfig, saveConfig } from "@squadrant/shared";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

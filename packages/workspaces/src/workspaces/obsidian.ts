@@ -5,7 +5,7 @@ import type {
   WorkspaceDriver,
   WorkspaceProbeResult,
   WorkspaceScope,
-} from "@cockpit/shared";
+} from "@squadrant/shared";
 
 // Rejects `../` escapes and absolute paths via lexical containment check.
 // Does NOT resolve symlinks — a symlink inside the vault pointing outside

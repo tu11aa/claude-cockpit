@@ -5,7 +5,7 @@ import type {
   ProjectionEmitResult,
   ProjectionEmitter,
   ProjectionSource,
-} from "@cockpit/shared";
+} from "@squadrant/shared";
 
 function renderMdc(source: ProjectionSource): string {
   const skillSections = source.skills

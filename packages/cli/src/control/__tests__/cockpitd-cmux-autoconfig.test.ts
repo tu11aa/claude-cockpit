@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startCockpitd } from "../cockpitd.js";
-import type { AutoConfigResult } from "@cockpit/shared";
+import type { AutoConfigResult } from "@squadrant/shared";
 
 const okResult: AutoConfigResult = {
   configPath: "/tmp/cmux.json",

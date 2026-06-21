@@ -23,8 +23,8 @@
 // feeding them from BOTH paths is harmless.
 import type { ChildProcess } from "node:child_process";
 import { spawn as nodeSpawn } from "node:child_process";
-import { resolveCmuxBin } from "@cockpit/shared";
-import type { ControlEvent } from "@cockpit/shared";
+import { resolveCmuxBin } from "@squadrant/shared";
+import type { ControlEvent } from "@squadrant/shared";
 
 /** Minimal subset of ChildProcess this bridge needs (injectable for tests). */
 export interface CmuxEventsChild {

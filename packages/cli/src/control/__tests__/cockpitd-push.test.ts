@@ -8,9 +8,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDaemon } from "@cockpit/core";
-import { createStore } from "@cockpit/core";
-import type { TaskRecord, ControlEvent } from "@cockpit/shared";
+import { createDaemon } from "@squadrant/core";
+import { createStore } from "@squadrant/core";
+import type { TaskRecord, ControlEvent } from "@squadrant/shared";
 
 function rec(id: string, overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {

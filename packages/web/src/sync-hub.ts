@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { CockpitConfig } from "@cockpit/shared";
-import { resolveHome } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
+import { resolveHome } from "@squadrant/shared";
 import type { ProjectStatus } from "./read-status.js";
 
 export interface SyncHubResult {

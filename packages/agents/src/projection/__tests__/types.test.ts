@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import type { CockpitConfig } from "@cockpit/shared";
+import type { CockpitConfig } from "@squadrant/shared";
 import type {
   ProjectionSource,
   ProjectionDestination,
   ProjectionEmitter,
   ProjectionEmitResult,
   ProjectionEmitterFactory,
-} from "@cockpit/shared";
+} from "@squadrant/shared";
 
 describe("projection types", () => {
   it("CockpitConfig accepts optional projection.targets", () => {

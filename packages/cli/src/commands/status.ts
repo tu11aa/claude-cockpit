@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import matter from "gray-matter";
-import { loadConfig } from "@cockpit/shared";
-import { createObsidianDriver, WorkspaceRegistry } from "@cockpit/workspaces";
+import { loadConfig } from "@squadrant/shared";
+import { createObsidianDriver, WorkspaceRegistry } from "@squadrant/workspaces";
 import { queryHealth, printServiceHealth } from "./health-view.js";
 
 interface StatusFrontmatter {

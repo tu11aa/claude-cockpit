@@ -3,8 +3,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDaemon, createStore, crewTag } from "@cockpit/core";
-import type { TaskRecord } from "@cockpit/shared";
+import { createDaemon, createStore, crewTag } from "@squadrant/core";
+import type { TaskRecord } from "@squadrant/shared";
 
 function rec(id: string, overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {

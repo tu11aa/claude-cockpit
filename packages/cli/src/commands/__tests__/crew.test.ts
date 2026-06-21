@@ -10,7 +10,7 @@ const status = vi.hoisted(() => vi.fn());
 const buildCommand = vi.hoisted(() => vi.fn());
 const probe = vi.hoisted(() => vi.fn());
 
-vi.mock("@cockpit/workspaces", () => ({
+vi.mock("@squadrant/workspaces", () => ({
   createCmuxDriver: () => ({
     name: "cmux",
     probe,
@@ -63,8 +63,8 @@ const loadConfig = vi.hoisted(() => vi.fn());
 const addWorktree = vi.hoisted(() => vi.fn());
 const removeWorktree = vi.hoisted(() => vi.fn());
 const resolveWorktreeBase = vi.hoisted(() => vi.fn().mockReturnValue("develop"));
-vi.mock("@cockpit/shared", async () => {
-  const actual = await vi.importActual<typeof import("@cockpit/shared")>("@cockpit/shared");
+vi.mock("@squadrant/shared", async () => {
+  const actual = await vi.importActual<typeof import("@squadrant/shared")>("@squadrant/shared");
   return { ...actual, loadConfig, resolveHome: (p: string) => p, addWorktree, removeWorktree, resolveWorktreeBase };
 });
 
@@ -75,7 +75,7 @@ const claudeDriver = vi.hoisted(() => ({
   buildCommand,
 }));
 
-vi.mock("@cockpit/agents", () => ({
+vi.mock("@squadrant/agents", () => ({
   createClaudeDriver: () => claudeDriver,
   createCodexDriver: () => ({ ...claudeDriver, name: "codex", templateSuffix: "generic" }),
   createGeminiDriver: () => ({ ...claudeDriver, name: "gemini", templateSuffix: "generic" }),
@@ -117,7 +117,7 @@ const resolveCrewRoute = vi.hoisted(() => vi.fn());
 vi.mock("../../control/crew-routing.js", () => ({ resolveCrewRoute }));
 
 import { runCrewSpawn, runCrewSend, runCrewRead, runCrewClose, runCrewList } from "../crew.js";
-import { reapCrewChildren } from "@cockpit/core";
+import { reapCrewChildren } from "@squadrant/core";
 
 const baseConfig = {
   commandName: "command",

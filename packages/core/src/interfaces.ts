@@ -2,7 +2,7 @@
 // Driver-seam interfaces: the contracts that cockpitd's driver-agnostic core depends on.
 // Concrete implementations (CodexInteractiveDriver, OpencodeSseBridge, CmuxEventsBridge,
 // DaemonCmux) live in the root package host and implement these structurally.
-import type { PaneRef } from "@cockpit/shared";
+import type { PaneRef } from "@squadrant/shared";
 
 /** Interactive agent runtime driver (codex/claude/opencode thread ops). */
 export interface AgentDriver {

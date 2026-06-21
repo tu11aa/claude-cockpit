@@ -39,12 +39,12 @@
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
-    "@cockpit/cli": "workspace:*",
-    "@cockpit/core": "workspace:*",
-    "@cockpit/agents": "workspace:*",
-    "@cockpit/shared": "workspace:*",
-    "@cockpit/workspaces": "workspace:*",
-    "@cockpit/web": "workspace:*",
+    "@squadrant/cli": "workspace:*",
+    "@squadrant/core": "workspace:*",
+    "@squadrant/agents": "workspace:*",
+    "@squadrant/shared": "workspace:*",
+    "@squadrant/workspaces": "workspace:*",
+    "@squadrant/web": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",

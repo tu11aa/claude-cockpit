@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
-import { loadConfig, type CockpitConfig } from "@cockpit/shared";
-import { createObsidianDriver, WorkspaceRegistry } from "@cockpit/workspaces";
-import type { WorkspaceDriver } from "@cockpit/shared";
+import { loadConfig, type CockpitConfig } from "@squadrant/shared";
+import { createObsidianDriver, WorkspaceRegistry } from "@squadrant/workspaces";
+import type { WorkspaceDriver } from "@squadrant/shared";
 
 function buildRegistry(): WorkspaceRegistry {
   return new WorkspaceRegistry({

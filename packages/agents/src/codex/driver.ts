@@ -8,8 +8,8 @@
 import { AppServerClient } from "./app-server-client.js";
 import { resolveCodexModel } from "./config.js";
 import { normalizeAppServerNotification } from "./normalize.js";
-import type { ControlEvent, TaskRecord } from "@cockpit/shared";
-import { TERMINAL_STATES } from "@cockpit/shared";
+import type { ControlEvent, TaskRecord } from "@squadrant/shared";
+import { TERMINAL_STATES } from "@squadrant/shared";
 
 /**
  * Boot-time guard for the daemon's codex reattach loop. Reattaching a thread
