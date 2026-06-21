@@ -3,7 +3,7 @@
 //
 // Live(ish) smoke for #109: spins up a real squadrantd from the worktree
 // dist on a temp socket, injects a capturing `notify`, seeds a task, then
-// drives the same control events that `cockpit crew signal done|blocked|
+// drives the same control events that `squadrant crew signal done|blocked|
 // failed` would emit. Asserts that each terminal/attention transition
 // produced exactly one captain-bound notification with the spec'd
 // CREW … [<provider>/<taskId-8>]: … format. Also probes redundancy
@@ -11,10 +11,10 @@
 // notify must not crash the daemon).
 //
 // We use `notify` capture rather than shelling out to the production
-// `cockpit runtime send` because (a) the unit suite already covers the
+// `squadrant runtime send` because (a) the unit suite already covers the
 // shell-out path, and (b) restarting the launchd-managed daemon to point
 // at the worktree build would interrupt unrelated in-flight sessions
-// (cockpit memory: "never auto-restart running captain/crew sessions").
+// (squadrant memory: "never auto-restart running captain/crew sessions").
 // This smoke validates startSquadrantd → createDaemon → notify wiring
 // end-to-end through the real socket; the shell-out is one execFileSync
 // call away in the default `notify` and is covered by the cmux notifier

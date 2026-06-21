@@ -162,7 +162,7 @@ esac
 
 # --- Handle existing workspace ---
 # Find existing workspace via runtime abstraction
-EXISTING_JSON=$(cockpit runtime list --json 2>/dev/null || echo "[]")
+EXISTING_JSON=$(squadrant runtime list --json 2>/dev/null || echo "[]")
 EXISTING_ID=$(echo "$EXISTING_JSON" | python3 -c "
 import json,sys
 try:
@@ -196,9 +196,9 @@ fi
 # Send initial prompt to trigger startup checklist (Claude agents only)
 if [ "$AGENT" = "claude" ]; then
   if [ "$ROLE" = "captain" ]; then
-    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:captain-ops skill, complete all startup steps, then report ready." 2>/dev/null) &
+    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the squadrant:captain-ops skill, complete all startup steps, then report ready." 2>/dev/null) &
   elif [ "$ROLE" = "command" ]; then
-    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the cockpit:command-ops skill, complete your daily briefing, then report ready." 2>/dev/null) &
+    (sleep 3 && "$CMUX" send --workspace "$NEW_UUID" "Run your startup checklist: use the squadrant:command-ops skill, complete your daily briefing, then report ready." 2>/dev/null) &
   fi
 fi
 
