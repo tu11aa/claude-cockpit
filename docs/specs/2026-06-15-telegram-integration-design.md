@@ -1,6 +1,8 @@
 # Telegram Integration — Design Spec
 
-> **POST-#332 NOTE:** This spec assumes the `notify-relay` transport, which was **deleted in #332**. Inbound/outbound messages now ride **daemon-direct cmux delivery**. Rebase the transport assumptions below onto daemon-direct before resuming implementation.
+> **⛔ SUPERSEDED (2026-06-22)** by [`docs/superpowers/specs/2026-06-22-telegram-integration-v1-design.md`](../superpowers/specs/2026-06-22-telegram-integration-v1-design.md). This spec targets the old flat `src/` layout and the `notify-relay` transport (deleted in #332). Kept for history only — do not implement from this. The v1 spec re-homes the design on the monorepo + daemon-direct delivery and scopes inbound to captain-only.
+>
+> **POST-#332 NOTE (historical):** This spec assumes the `notify-relay` transport, which was **deleted in #332**. Inbound/outbound messages now ride **daemon-direct cmux delivery**.
 
 **Issue:** #65 — Telegram integration for remote cockpit control
 **Date:** 2026-06-15

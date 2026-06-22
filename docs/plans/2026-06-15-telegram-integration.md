@@ -1,6 +1,8 @@
 # Telegram Integration Implementation Plan
 
-> **POST-#332 NOTE:** This plan assumes the `notify-relay` transport, which was **deleted in #332**. Inbound/outbound messages now ride **daemon-direct cmux delivery**. Rebase the transport assumptions below onto daemon-direct before resuming implementation.
+> **⛔ SUPERSEDED (2026-06-22)** by the v1 design at [`docs/superpowers/specs/2026-06-22-telegram-integration-v1-design.md`](../superpowers/specs/2026-06-22-telegram-integration-v1-design.md) and its forthcoming implementation plan. Kept for history only — do not implement from this.
+>
+> **POST-#332 NOTE (historical):** This plan assumes the `notify-relay` transport, which was **deleted in #332**. Inbound/outbound messages now ride **daemon-direct cmux delivery**.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
