@@ -241,6 +241,56 @@ After a crew task completes:
 
 Status writes (`write-status.sh`) are opt-in; you don't need to write status after every event.
 
+## Status Board (show after substantive turns)
+
+After a **substantive turn** — shipped a release, opened or merged a PR, filed an issue, spawned or closed crews, or moved multiple threads at once — end your reply with a tight scannable board. Skip it after trivial answers; the board is signal, not noise.
+
+### When to show
+
+| Show | Skip |
+|------|------|
+| Opened / merged / closed a PR | Answered a quick question |
+| Tagged a release or published to npm | Read a file or ran a status check |
+| Filed a GitHub issue | Forwarded a one-line follow-up to an existing crew |
+| Spawned or closed crew(s) | Repeated state the user just asked for |
+| Multiple threads moved in one turn | |
+
+### Pull state fresh before writing
+
+No memory, no approximation — run these first:
+
+```bash
+gh pr list --state open --json number,title,headRefName,isDraft   # open PRs
+squadrant crew list <project>                                      # live crews
+gh release list --limit 3                                         # recent tags
+npm view squadrant version 2>/dev/null                            # published version
+```
+
+### Board format
+
+```
+Right now → <one sentence: what just happened and what it unblocks>
+
+✅ Done         <completed item — note what it unblocks>
+✅ Done         <another if multiple>
+
+⏳ In progress  <crew-name> — <task + current state: idle|working|blocked>
+⏳ In progress  <another crew if running>
+
+▶️ Next         <immediate next action — specific, actionable>
+▶️ Next         <secondary if clear>
+
+👀 Watch        PR #N — <title> (draft | ready | needs review)
+👀 Watch        <release or deploy or issue to monitor>
+```
+
+### Rules
+
+- **Live data only.** Run the commands above; do not recall from memory. A stale board is worse than no board.
+- **~20–35 lines total.** Omit rows with nothing to say — an empty ⏳ section is just noise.
+- **One punchline.** The `Right now →` line is one sentence capturing the net state change.
+- **Portable.** Uses `gh` and `squadrant` CLI — works for claude, codex, opencode, and gemini crews alike.
+
 ## Session Shutdown (Opt-In Writes)
 
 End-of-session writes are **opt-in**, not on a schedule. Only write what is meaningful:
