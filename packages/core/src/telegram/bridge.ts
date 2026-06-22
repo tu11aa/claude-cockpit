@@ -3,6 +3,9 @@
 // crash-contained: no send/poll error may escape into the daemon.
 import type { ControlEvent, TelegramConfig } from "@squadrant/shared";
 import type { TelegramClient } from "./client.js";
+import { isAuthorized, isControlEnabled } from "./auth.js";
+import { parseCommand } from "./commands.js";
+import type { EnsureResult } from "./ensure-captain.js";
 import { formatInbound, formatLifecycle, topicName } from "./format.js";
 import { findProjectByThread, loadState, saveState, setTopic, topicKey } from "./state.js";
 
@@ -19,6 +22,14 @@ export interface TelegramBridgeOptions {
   client: TelegramClient;
   appendCaptainMessage: (a: { stateRoot: string; project: string; text: string; source: "telegram" }) => Promise<void>;
   log: (msg: string) => void;
+  // ── Control surfaces (#402/#403/#321) — all optional. When undefined the bridge
+  // keeps exact v1 behavior (queue-only project topics, General topic dropped).
+  /** Boot-if-down before delivering to a project topic. Injected by the daemon host. */
+  ensureCaptainAlive?: (project: string) => Promise<EnsureResult>;
+  /** Execute a curated squadrant CLI argv and return capped output. */
+  runCommand?: (argv: string[]) => Promise<string>;
+  /** Post a reply to the General topic (threadId undefined) or a project topic. */
+  sendReply?: (threadId: number | undefined, text: string) => Promise<void>;
 }
 
 // Bot API long-poll window. The loop also sleeps cfg.pollMs between iterations so
@@ -28,7 +39,7 @@ const LONG_POLL_SEC = 50;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export function createTelegramBridge(opts: TelegramBridgeOptions): TelegramBridge {
-  const { cfg, stateRoot, client, appendCaptainMessage, log } = opts;
+  const { cfg, stateRoot, client, appendCaptainMessage, log, ensureCaptainAlive, runCommand, sendReply } = opts;
   const pollMs = cfg.pollMs ?? 1000;
   let running = false;
 
@@ -48,16 +59,73 @@ export function createTelegramBridge(opts: TelegramBridgeOptions): TelegramBridg
     await client.sendMessage(cfg.supergroupId, threadId, formatLifecycle(project, ev));
   }
 
-  // Inbound: one update → at most one captain.message. Returns nothing; throws only
-  // on an append (delivery-infra) failure so the caller can decline to advance the
-  // offset (at-least-once). Allowlist/resolution misses are silent drops.
-  async function handleUpdate(u: { message?: { chat: { id: number }; message_thread_id?: number; text?: string } }): Promise<void> {
-    const m = u.message;
-    if (!m || m.text === undefined || m.message_thread_id === undefined) return;
-    if (!cfg.chats.includes(m.chat.id)) return; // not an allowlisted chat
-    const resolved = findProjectByThread(stateRoot, m.message_thread_id);
+  // Reply best-effort: a send failure must never escape into the poll loop.
+  async function reply(threadId: number | undefined, text: string): Promise<void> {
+    if (!sendReply) return;
+    try {
+      await sendReply(threadId, text);
+    } catch (e) {
+      log(`telegram reply failed: ${(e as Error).message}`);
+    }
+  }
+
+  // General topic (no thread id): curated command channel (#402). Fail-closed —
+  // a slash command runs ONLY when remoteControl is on AND the sender is
+  // allowlisted. Freeform text gets a /help hint (never silently dropped).
+  // Command/reply failures are caught here so they can't escape the poll loop.
+  async function handleGeneral(text: string, fromId: number | undefined): Promise<void> {
+    if (!text.startsWith("/")) {
+      await reply(undefined, "Send /help for commands.");
+      return;
+    }
+    if (!isControlEnabled(cfg) || !isAuthorized(fromId, cfg)) {
+      await reply(undefined, "⛔ not authorized");
+      return;
+    }
+    const parsed = parseCommand(text);
+    if (parsed.kind !== "ok") {
+      await reply(undefined, parsed.message);
+      return;
+    }
+    try {
+      const out = runCommand ? await runCommand(parsed.argv) : "(command runner unavailable)";
+      await reply(undefined, out);
+    } catch (e) {
+      await reply(undefined, `⚠️ command failed: ${(e as Error).message}`);
+      log(`telegram command failed argv=${JSON.stringify(parsed.argv)}: ${(e as Error).message}`);
+    }
+  }
+
+  // Project topic: the v1 captain.message flow + Gap-1 auto-launch (#403). When
+  // control is off OR the sender isn't allowlisted, behaves exactly as v1
+  // (append only). The append throws on delivery-infra failure so the caller can
+  // decline to advance the offset (at-least-once); auto-launch failures are
+  // contained and never block the append.
+  async function handleProjectTopic(text: string, threadId: number, fromId: number | undefined): Promise<void> {
+    const resolved = findProjectByThread(stateRoot, threadId);
     if (!resolved) return; // no project bound to this topic
-    await appendCaptainMessage({ stateRoot, project: resolved.project, text: formatInbound(m.text), source: "telegram" });
+    if (ensureCaptainAlive && isControlEnabled(cfg) && isAuthorized(fromId, cfg)) {
+      try {
+        const r = await ensureCaptainAlive(resolved.project);
+        if (r === "timeout") await reply(threadId, "⚠️ captain didn't warm up; message queued.");
+      } catch (e) {
+        log(`telegram auto-launch failed project=${resolved.project}: ${(e as Error).message}`);
+      }
+    }
+    await appendCaptainMessage({ stateRoot, project: resolved.project, text: formatInbound(text), source: "telegram" });
+  }
+
+  // Inbound: classify by thread id. General topic → command channel; project
+  // topic → captain.message (+ auto-launch). Throws only on append failure.
+  async function handleUpdate(u: { message?: { chat: { id: number }; message_thread_id?: number; text?: string; from?: { id: number } } }): Promise<void> {
+    const m = u.message;
+    if (!m || m.text === undefined) return;
+    if (!cfg.chats.includes(m.chat.id)) return; // not an allowlisted chat (coarse filter)
+    if (m.message_thread_id === undefined) {
+      await handleGeneral(m.text, m.from?.id);
+      return;
+    }
+    await handleProjectTopic(m.text, m.message_thread_id, m.from?.id);
   }
 
   async function pollLoop(): Promise<void> {
