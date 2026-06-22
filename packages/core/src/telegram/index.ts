@@ -1,4 +1,5 @@
 // @squadrant/core Telegram subsystem barrel.
+export * from "./auth.js";
 export * from "./format.js";
 export * from "./state.js";
 export * from "./client.js";

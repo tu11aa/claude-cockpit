@@ -40,10 +40,12 @@ export interface CrewRoutingConfig {
 }
 
 export interface TelegramConfig {
-  botToken?: string;    // falls back to env TELEGRAM_BOT_TOKEN at read time
-  supergroupId: number; // forum supergroup hosting per-project topics
-  chats: number[];      // chat_id allowlist (inbound honored only from these)
-  pollMs?: number;      // getUpdates long-poll cadence (default 1000)
+  botToken?: string;       // falls back to env TELEGRAM_BOT_TOKEN at read time
+  supergroupId: number;    // forum supergroup hosting per-project topics
+  chats: number[];         // chat_id allowlist (inbound honored only from these)
+  users?: number[];        // user-id allowlist for CONTROL actions (#321); empty ⇒ control disabled
+  remoteControl?: boolean; // opt-in master switch for auto-launch + general commands (default false)
+  pollMs?: number;         // getUpdates long-poll cadence (default 1000)
 }
 
 export interface ModelRoutingConfig {
