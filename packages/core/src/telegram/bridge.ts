@@ -151,14 +151,22 @@ export function createTelegramBridge(opts: TelegramBridgeOptions): TelegramBridg
       return;
     }
 
-    const pref = parseNotifyPref(text);
-    if (pref !== null) {
-      // Deliberate preference change — fail-closed, writes the per-project config
-      // file (not live state), never appended as a captain message.
+    // Any /notify attempt (including an incomplete one like a bare `/notify`) is
+    // handled here and NEVER appended as a captain message. The first token is
+    // matched after stripping a `@botname` suffix Telegram adds in groups.
+    if (stripBotMention(text.trim().split(/\s+/)[0] ?? "").toLowerCase() === "/notify") {
+      // Fail-closed: only an allowlisted sender under remoteControl may proceed.
       if (!isControlEnabled(cfg) || !isAuthorized(fromId, cfg)) {
         await reply(threadId, "⛔ not authorized");
         return;
       }
+      const pref = parseNotifyPref(text);
+      if (pref === null) {
+        // Incomplete (bare `/notify`, or a dimension with no value) → usage hint.
+        await reply(threadId, "usage: /notify crew <all|alert_only|done_only|none> | cap <on|off>");
+        return;
+      }
+      // Deliberate preference change — writes the per-project config file (not live state).
       if (pref.dimension === "crew") {
         if (!CREW_TIERS.includes(pref.value)) {
           await reply(threadId, "crew must be all|alert_only|done_only|none");

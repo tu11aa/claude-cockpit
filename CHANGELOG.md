@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **An incomplete `/notify` in a Telegram project topic now replies with a usage hint instead of being sent to the captain.** A bare `/notify` (or `/notify@<botname>`, or a dimension with no value like `/notify cap`) previously fell through and was appended as a captain message. It is now recognized as a `/notify` attempt: fail-closed behind remote control, then either applied (when complete) or answered with `usage: /notify crew <all|alert_only|done_only|none> | cap <on|off>`. Ordinary messages and `/mute`/`/unmute` are unchanged.
 - **Telegram commands tapped from the `/` menu in groups now work correctly.** Telegram appends `@<botname>` to menu-tapped commands (e.g. `/status@squadrant_bot`). The three command parsers (`parseCommand`, `parseNotifyPref`, `notifyToggle`) now strip this suffix from the first token before matching, so menu-tapped commands are recognized identically to manually typed bare commands.
 
 ### Added
