@@ -7,6 +7,7 @@ import {
   loadState,
   saveState,
   setTopic,
+  setLastUserId,
   findProjectByThread,
   isNotifyActive,
   setNotify,
@@ -98,5 +99,31 @@ describe("notify state", () => {
     const s = loadState(dir);
     expect(s.topics).toEqual({ "squadrant::project": 7 });
     expect(s.notify).toEqual({ squadrant: true });
+  });
+});
+
+describe("lastUserId", () => {
+  it("is absent (undefined) when the file is missing", () => {
+    expect(loadState(root).lastUserId).toBeUndefined();
+  });
+
+  it("setLastUserId round-trips through save/load", () => {
+    setLastUserId(root, 42);
+    expect(loadState(root).lastUserId).toBe(42);
+  });
+
+  it("setLastUserId preserves offset, topics, and notify", () => {
+    saveState(root, { offset: 7, topics: { "sq::project": 1 }, notify: { sq: true } });
+    setLastUserId(root, 99);
+    const s = loadState(root);
+    expect(s.offset).toBe(7);
+    expect(s.topics).toEqual({ "sq::project": 1 });
+    expect(s.notify).toEqual({ sq: true });
+    expect(s.lastUserId).toBe(99);
+  });
+
+  it("loadState does not set lastUserId key when field is absent in the file", () => {
+    saveState(root, { offset: 0, topics: {}, notify: {} });
+    expect(Object.prototype.hasOwnProperty.call(loadState(root), "lastUserId")).toBe(false);
   });
 });
