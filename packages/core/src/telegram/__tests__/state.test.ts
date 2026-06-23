@@ -65,7 +65,7 @@ describe("setTopic / findProjectByThread", () => {
   });
 
   it("setTopic preserves the existing offset", () => {
-    saveState(root, { offset: 5, topics: {} });
+    saveState(root, { offset: 5, topics: {}, notify: {} });
     setTopic(root, "squadrant", 100);
     expect(loadState(root).offset).toBe(5);
   });
