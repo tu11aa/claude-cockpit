@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { getDefaultConfig, type SquadrantConfig, type TelegramConfig } from "@squadrant/shared";
-import { loadState } from "@squadrant/core";
-import { telegramCommand, runTelegramStatus, runTelegramLink, runTelegramSend, questionMasked } from "../telegram.js";
+import { loadState, setLastUserId } from "@squadrant/core";
+import { telegramCommand, runTelegramStatus, runTelegramLink, runTelegramSend, runRegisterCommands, resolveSetupToken, resolveSetupUserId, questionMasked, runTelegramPostSetup } from "../telegram.js";
 
 let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), "sq-tg-cmd-")); });
@@ -19,13 +19,65 @@ function fakeClient(onCreate?: () => void) {
     sendMessage: async () => {},
     createForumTopic: async () => { onCreate?.(); return next++; },
     getMe: async () => ({ id: 0, username: "" }),
+    setMyCommands: async () => {},
+    answerCallbackQuery: async () => {},
+    editMessageReplyMarkup: async () => {},
   };
 }
 
 describe("telegramCommand registration", () => {
-  it("exposes the link, send, setup, and status subcommands", () => {
+  it("exposes the link, notify, register-commands, send, setup, and status subcommands", () => {
     const names = telegramCommand.commands.map((c) => c.name()).sort();
-    expect(names).toEqual(["link", "send", "setup", "status"]);
+    expect(names).toEqual(["link", "notify", "register-commands", "send", "setup", "status"]);
+  });
+
+  it("setup command exposes --redetect and --user-id options", () => {
+    const setupCmd = telegramCommand.commands.find((c) => c.name() === "setup")!;
+    const longNames = setupCmd.options.map((o) => o.long);
+    expect(longNames).toContain("--redetect");
+    expect(longNames).toContain("--user-id");
+  });
+});
+
+describe("resolveSetupToken", () => {
+  it("returns 'prompt' when no existing token", () => {
+    expect(resolveSetupToken(undefined, { resetToken: false })).toBe("prompt");
+  });
+  it("returns 'try-reuse' when an existing token is present", () => {
+    expect(resolveSetupToken("tok123", { resetToken: false })).toBe("try-reuse");
+  });
+  it("returns 'prompt' when --reset-token is set even with an existing token", () => {
+    expect(resolveSetupToken("tok123", { resetToken: true })).toBe("prompt");
+  });
+});
+
+describe("resolveSetupUserId", () => {
+  it("prefers --user-id flag over detectedUserId and lastUserId from state", () => {
+    setLastUserId(root, 99);
+    expect(resolveSetupUserId(5, 10, root)).toBe(5);
+  });
+
+  it("uses detectedUserId when no flag", () => {
+    expect(resolveSetupUserId(undefined, 42, root)).toBe(42);
+  });
+
+  it("falls back to lastUserId persisted in state when no flag and no detected", () => {
+    setLastUserId(root, 77);
+    expect(resolveSetupUserId(undefined, undefined, root)).toBe(77);
+  });
+
+  it("returns undefined when all sources are absent", () => {
+    expect(resolveSetupUserId(undefined, undefined, root)).toBeUndefined();
+  });
+});
+
+describe("runRegisterCommands", () => {
+  it("registers the curated menu via client.setMyCommands", async () => {
+    const calls: any[] = [];
+    const client: any = { setMyCommands: async (c: any) => { calls.push(c); } };
+    await runRegisterCommands({ client });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].map((c: any) => c.command)).toContain("notify");
   });
 });
 
@@ -99,6 +151,30 @@ describe("runTelegramSend", () => {
   });
 });
 
+import { runTelegramNotifySet, runTelegramNotifyStatus, runNotifyConfirmation } from "../telegram.js";
+import { isNotifyActive, setTopic as setTopicDirect } from "@squadrant/core";
+
+describe("telegram notify CLI", () => {
+  it("runTelegramNotifySet writes the flag", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cli-"));
+    runTelegramNotifySet({ project: "squadrant", active: true, stateRoot: dir });
+    expect(isNotifyActive(dir, "squadrant")).toBe(true);
+    runTelegramNotifySet({ project: "squadrant", active: false, stateRoot: dir });
+    expect(isNotifyActive(dir, "squadrant")).toBe(false);
+  });
+
+  it("runTelegramNotifyStatus lists known projects (from topics ∪ notify)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cli-"));
+    setTopicDirect(dir, "alpha", 1);
+    runTelegramNotifySet({ project: "beta", active: true, stateRoot: dir });
+    const rows = runTelegramNotifyStatus({ stateRoot: dir }).sort((a, b) => a.project.localeCompare(b.project));
+    expect(rows).toEqual([
+      { project: "alpha", active: false },
+      { project: "beta", active: true },
+    ]);
+  });
+});
+
 describe("questionMasked stdin teardown", () => {
   it("pauses stdin and removes keypress listener on enter so the event loop can drain", async () => {
     // Stub the stdin methods that require a real TTY
@@ -130,5 +206,66 @@ describe("questionMasked stdin teardown", () => {
       process.stdin.pause = origPause;
       stdoutSpy.mockRestore();
     }
+  });
+});
+
+describe("runNotifyConfirmation", () => {
+  const ON = { active: true, cap: true, crew: "all" } as const;
+  function fakeTrackingClient() {
+    const calls: any[] = [];
+    return {
+      calls,
+      sendMessage: async (...a: any[]) => { calls.push(a); },
+      createForumTopic: async () => 1,
+      getUpdates: async () => [],
+      getMe: async () => ({ id: 1, username: "b" }),
+      setMyCommands: async () => {},
+      answerCallbackQuery: async () => {},
+      editMessageReplyMarkup: async () => {},
+    };
+  }
+  const tgCfg = { supergroupId: 5, chats: [1] } as any;
+
+  it("sends one confirmation on cap off when a topic exists", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cf-"));
+    setTopicDirect(dir, "squadrant", 9);
+    const c = fakeTrackingClient();
+    const sent = await runNotifyConfirmation({ project: "squadrant", before: { ...ON }, after: { ...ON, cap: false }, cfg: tgCfg, client: c as any, stateRoot: dir });
+    expect(sent).toBe(true);
+    expect(c.calls).toHaveLength(1);
+    expect(c.calls[0][1]).toBe(9); // threadId
+  });
+
+  it("sends nothing for a louder/unchanged change", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cf-"));
+    setTopicDirect(dir, "squadrant", 9);
+    const c = fakeTrackingClient();
+    expect(await runNotifyConfirmation({ project: "squadrant", before: { ...ON }, after: { ...ON }, cfg: tgCfg, client: c as any, stateRoot: dir })).toBe(false);
+    expect(c.calls).toHaveLength(0);
+  });
+
+  it("sends nothing when the project has no topic", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cf-"));
+    const c = fakeTrackingClient();
+    expect(await runNotifyConfirmation({ project: "x", before: { ...ON }, after: { ...ON, cap: false }, cfg: tgCfg, client: c as any, stateRoot: dir })).toBe(false);
+    expect(c.calls).toHaveLength(0);
+  });
+
+  it("swallows send failure and reports false", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tg-cf-"));
+    setTopicDirect(dir, "squadrant", 9);
+    const c: any = { sendMessage: async () => { throw new Error("boom"); } };
+    expect(await runNotifyConfirmation({ project: "squadrant", before: { ...ON }, after: { ...ON, cap: false }, cfg: tgCfg, client: c, stateRoot: dir })).toBe(false);
+  });
+});
+
+// ── daemon auto-restart after telegram setup ──────────────────────────────────
+
+describe("runTelegramPostSetup — restart gating", () => {
+  it("calls restart helper with a reason mentioning telegram", () => {
+    const spy = vi.fn().mockReturnValue("restarted");
+    runTelegramPostSetup({ doRestart: spy });
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy.mock.calls[0][0]).toMatchObject({ reason: expect.stringContaining("telegram") });
   });
 });

@@ -86,11 +86,24 @@ const REGISTRY: Record<string, Entry> = {
       return ok("spawn", ["crew", "spawn", project, task]);
     },
   },
+  mute: {
+    usage: "/mute <project>",
+    build: (a) => (a[0] ? ok("mute", ["telegram", "notify", a[0], "off"]) : usage("mute", "usage: /mute <project>")),
+  },
+  unmute: {
+    usage: "/unmute <project>",
+    build: (a) => (a[0] ? ok("unmute", ["telegram", "notify", a[0], "on"]) : usage("unmute", "usage: /unmute <project>")),
+  },
 };
 
 function helpText(): string {
   const lines = Object.values(REGISTRY).map((e) => `  ${e.usage}`);
   return ["Available commands:", ...lines, "  /help"].join("\n");
+}
+
+/** Strip the `@botname` suffix Telegram appends to menu-tapped commands in groups. */
+export function stripBotMention(token: string): string {
+  return token.split("@")[0];
 }
 
 /** Parse a raw Telegram message into a curated command. Non-slash text and
@@ -101,7 +114,7 @@ export function parseCommand(text: string): ParsedCommand {
     return { kind: "unknown", message: "unknown command — send /help" };
   }
   const tokens = trimmed.slice(1).split(/\s+/).filter((t) => t.length > 0);
-  const name = (tokens[0] ?? "").toLowerCase();
+  const name = stripBotMention(tokens[0] ?? "").toLowerCase();
   const args = tokens.slice(1);
 
   if (name === "help") {

@@ -76,6 +76,61 @@ describe("createTelegramClient.sendMessage", () => {
   });
 });
 
+describe("createTelegramClient.sendMessage reply_markup", () => {
+  it("includes reply_markup when given a 4th arg", async () => {
+    const { fn, calls } = fakeFetch({ ok: true, result: {} });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+    const kb = { inline_keyboard: [[{ text: "x", callback_data: "e:max" }]] };
+
+    await client.sendMessage(5, 9, "hi", kb);
+
+    expect(calls[0].url).toBe("https://api.telegram.org/botTKN/sendMessage");
+    expect(bodyOf(calls[0])).toEqual({ chat_id: 5, message_thread_id: 9, text: "hi", reply_markup: kb });
+  });
+
+  it("omits reply_markup when not given", async () => {
+    const { fn, calls } = fakeFetch({ ok: true, result: {} });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+
+    await client.sendMessage(5, undefined, "hi");
+
+    expect(bodyOf(calls[0])).toEqual({ chat_id: 5, text: "hi" });
+  });
+});
+
+describe("createTelegramClient.answerCallbackQuery", () => {
+  it("POSTs callback_query_id and text", async () => {
+    const { fn, calls } = fakeFetch({ ok: true, result: true });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+
+    await client.answerCallbackQuery("cb1", "done");
+
+    expect(calls[0].url).toBe("https://api.telegram.org/botTKN/answerCallbackQuery");
+    expect(bodyOf(calls[0])).toMatchObject({ callback_query_id: "cb1", text: "done" });
+  });
+
+  it("omits text when not given", async () => {
+    const { fn, calls } = fakeFetch({ ok: true, result: true });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+
+    await client.answerCallbackQuery("cb1");
+
+    expect(bodyOf(calls[0])).toEqual({ callback_query_id: "cb1" });
+  });
+});
+
+describe("createTelegramClient.editMessageReplyMarkup", () => {
+  it("POSTs chat_id, message_id and reply_markup", async () => {
+    const { fn, calls } = fakeFetch({ ok: true, result: {} });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+
+    await client.editMessageReplyMarkup(5, 42, { inline_keyboard: [] });
+
+    expect(calls[0].url).toBe("https://api.telegram.org/botTKN/editMessageReplyMarkup");
+    expect(bodyOf(calls[0])).toMatchObject({ chat_id: 5, message_id: 42, reply_markup: { inline_keyboard: [] } });
+  });
+});
+
 describe("createTelegramClient.createForumTopic", () => {
   it("POSTs chat_id and name and returns the new message_thread_id", async () => {
     const { fn, calls } = fakeFetch({ ok: true, result: { message_thread_id: 42 } });
@@ -86,6 +141,28 @@ describe("createTelegramClient.createForumTopic", () => {
     expect(threadId).toBe(42);
     expect(calls[0].url).toBe("https://api.telegram.org/botTKN/createForumTopic");
     expect(bodyOf(calls[0])).toEqual({ chat_id: -100, name: "squadrant" });
+  });
+});
+
+describe("createTelegramClient.setMyCommands", () => {
+  it("POSTs commands array under the setMyCommands method and resolves", async () => {
+    const { fn, calls } = fakeFetch({ ok: true, result: true });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+    const cmds = [{ command: "status", description: "squadrant status" }];
+
+    await client.setMyCommands(cmds);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://api.telegram.org/botTKN/setMyCommands");
+    expect(calls[0].init?.method).toBe("POST");
+    expect(bodyOf(calls[0])).toEqual({ commands: cmds });
+  });
+
+  it("rejects when the Bot API returns ok:false", async () => {
+    const { fn } = fakeFetch({ ok: false, error_code: 401, description: "Unauthorized" });
+    const client = createTelegramClient({ token: "TKN", fetch: fn });
+
+    await expect(client.setMyCommands([])).rejects.toThrow("telegram setMyCommands failed (401): Unauthorized");
   });
 });
 

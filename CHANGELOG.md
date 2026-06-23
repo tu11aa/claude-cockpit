@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-23
+
+### Added
+- **Tap-first Telegram commands (inline buttons).** `/notify`, `/effort`, and `/crews`/`/launch`/`/mute`/`/unmute` now reply with tappable button panels instead of needing typed arguments — pick from buttons, no syntax to remember. Button taps are gated on your user-id (remoteControl) like commands, applied via the existing state writers / curated command runner, and the panel re-renders to mark the new state. Typed forms (`/notify cap on`, `/crews <project>`, `/effort <mode>`) still work for power users.
+- **Guided `/spawn` over Telegram.** `/spawn` now replies with a project picker; tap a project and the bot asks (ForceReply) for the task — your reply spawns the crew. No typed arguments needed. (Completes the tap-first command UX.)
+
+### Fixed
+- **An incomplete `/notify` in a Telegram project topic now replies with a tap-first button panel instead of being sent to the captain.** A bare `/notify` (or `/notify@<botname>`, or a dimension with no value like `/notify cap`) previously fell through and was appended as a captain message. It is now recognized as a `/notify` attempt: fail-closed behind remote control, then either applied (when typed in full, e.g. `/notify cap on`) or answered with the notification panel (Captain on/off · crew tier · mute/unmute). Ordinary messages and `/mute`/`/unmute` are unchanged.
+- **Telegram commands tapped from the `/` menu in groups now work correctly.** Telegram appends `@<botname>` to menu-tapped commands (e.g. `/status@squadrant_bot`). The three command parsers (`parseCommand`, `parseNotifyPref`, `notifyToggle`) now strip this suffix from the first token before matching, so menu-tapped commands are recognized identically to manually typed bare commands.
+
+### Added
+- **`squadrant telegram setup` auto-captures your Telegram user-id.** The running daemon now passively records the sender id from every allowlisted inbound message into `telegram-state.json` (`lastUserId`). On a re-run of `setup` in reuse mode, if the daemon has seen a message from you, setup auto-offers "Enable remote control for your user-id `<id>`?" without requiring `--user-id` or a conflicting `getUpdates` detection poll. Precedence: `--user-id` flag > `getUpdates`-detected (first-run only) > `lastUserId` from state.
+- **`squadrant telegram setup` is now re-run-safe.** Re-running setup with an existing supergroup configured skips `getUpdates` entirely — avoids the 60 s timeout caused by the daemon's poll consuming the single-consumer long-poll channel. New `--redetect` flag forces fresh group detection; new `--user-id <id>` flag lets you enable remote control on a re-run without touching `getUpdates`. Allowlist precedence: `--user-id` > detected userId (first-run only) > existing `cfg.users` (preserved).
+- **Daemon auto-restarts when you change daemon-cached config.** `squadrant telegram setup`, `squadrant config set <telegram.*|defaults.taskTimeoutMs|defaults.cmuxEventsBridge|projects.*>`, and project registration now restart the daemon so the change takes effect immediately (was: silently stale until a manual `squadrant heal daemon`). Use `--no-restart` to opt out. Interactive crews + tasks + Telegram state recover automatically via the disk store + boot reconcile.
+- **Telegram `/command` menu registration.** `squadrant telegram setup` now registers the bot's command menu automatically, and `squadrant telegram register-commands` (re)registers it on demand — so `/status`, `/notify`, `/mute`, etc. appear in Telegram's `/` autocomplete. Setup also reuses an existing bot token on re-run (use `--reset-token` to rotate it), reports existing project topics so you can see what's already linked, and never recreates topics that already exist in state.
+- **`squadrant:telegram` skill** documenting setup, remote control, command registration, and notification tuning.
+- **Telegram mute confirmations.** Turning a project quieter via `squadrant telegram notify <p> off|cap off|crew <lower>` now posts a one-time confirmation into that project's topic (bypassing the mute), so you can tell on Telegram that it went silent rather than guessing.
+- **Per-project layered config.** A new override layer at `~/.config/squadrant/projects/<name>.json` resolves as built-in → global `config.json` → per-project, merged per key (`resolveNotify` / `loadProjectOverride` / `saveProjectOverride` in `@squadrant/shared`). Fully additive: an absent project file behaves exactly as the global defaults — no migration. The resolver is generic; Telegram notification is its first tenant (per-project `effort`/`models` keys are reserved, not yet wired).
+- **Telegram notification tiers (per-project).** Outbound lifecycle pushes are filtered by a per-project **crew tier** — `none` ⊂ `done_only` (`task.done`/`task.failed`) ⊂ `alert_only` (+ blocked/approval/input/timeout, the default) ⊂ `all`. New CLI `squadrant telegram notify <project> crew <tier>` / `cap <on|off>` and Telegram `/notify crew <tier>` / `/notify cap <on|off>` (fail-closed behind remote control) write the per-project config file. The live `active` mute axis (`/mute` / `/unmute` / `notify <project> on|off`) is unchanged and stays in `telegram-state.json`; the live value overrides the config-default `active`.
+- **Distinct Telegram formatting** for `task.failed` (CREW FAILED + error), `task.approval.requested` (APPROVAL NEEDED + question), `task.input.requested` (INPUT NEEDED + question), and `task.timeout` (CREW TIMEOUT) — previously these fell to the generic line.
+- **`cap` gate on `squadrant telegram send`** — with a project's resolved `cap=off`, explicit captain messages are suppressed (not sent), independent of idle-mute.
+
+### Known issues
+- A config-write restart can orphan in-flight **headless** crews (interactive crews recover fine) — see [#410](https://github.com/tu11aa/squadrant/issues/410).
+
+### Changed
+- **Telegram notifications are now per-project and muted by default.** Lifecycle events (crew done/blocked/idle) are delivered to a project's topic only after you engage that project — by sending any message into its topic, by `/unmute` (Telegram, requires remoteControl), or by `squadrant telegram notify <project> on`. This changes prior behavior where every project pushed all lifecycle events. Mute again with `/mute <project>` or `squadrant telegram notify <project> off`. Command replies and the General command channel are unaffected.
+
 ## [0.10.0] - 2026-06-23
 
 The Telegram stability slice — closes two usability gaps so the integration is solid enough to release, both gated behind a fail-closed user-id allowlist + an opt-in master switch. Default behavior is unchanged on upgrade (`remoteControl` defaults to `false`).

@@ -1,5 +1,6 @@
 // @squadrant/shared — pure types + leaf utilities + config.
 export * from "./config.js";
+export * from "./project-config.js";
 export * from "./effort.js";
 export * from "./types/runtime.js";
 export * from "./types/control.js";
@@ -19,3 +20,4 @@ export * from "./lib/tool-compat.js";
 export * from "./lib/canonical-source.js";
 export * from "./lib/daily-logs.js";
 export * from "./lib/vault-layout.js";
+export * from "./daemon-keys.js";
