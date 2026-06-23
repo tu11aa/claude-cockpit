@@ -144,3 +144,58 @@ describe("handleUpdate routing", () => {
     bridge.stop();
   });
 });
+
+describe("/notify in a project topic", () => {
+  const ctrlCfg = { ...baseCfg, remoteControl: true, users: [ALLOWED_USER] };
+
+  it("bare /notify (authorized) replies with usage and never appends a captain message", async () => {
+    setTopic(stateRoot, "brove", 7);
+    const d = deps();
+    const { bridge, drained } = drive({ cfg: ctrlCfg, ...d }, [topicMsg("/notify", 7)]);
+    await drained;
+    expect(d.sendReply).toHaveBeenCalledWith(7, expect.stringContaining("usage: /notify"));
+    expect(d.appendCaptainMessage).not.toHaveBeenCalled();
+    bridge.stop();
+  });
+
+  it("bare /notify@botname (authorized) replies with usage (proves @botname strip)", async () => {
+    setTopic(stateRoot, "brove", 7);
+    const d = deps();
+    const { bridge, drained } = drive({ cfg: ctrlCfg, ...d }, [topicMsg("/notify@squadrant_bot", 7)]);
+    await drained;
+    expect(d.sendReply).toHaveBeenCalledWith(7, expect.stringContaining("usage: /notify"));
+    expect(d.appendCaptainMessage).not.toHaveBeenCalled();
+    bridge.stop();
+  });
+
+  it("bare /notify (unauthorized) replies not authorized and never appends", async () => {
+    setTopic(stateRoot, "brove", 7);
+    const d = deps();
+    const { bridge, drained } = drive({ cfg: baseCfg, ...d }, [topicMsg("/notify", 7)]);
+    await drained;
+    expect(d.sendReply).toHaveBeenCalledWith(7, expect.stringContaining("not authorized"));
+    expect(d.appendCaptainMessage).not.toHaveBeenCalled();
+    bridge.stop();
+  });
+
+  it("/notify cap on (authorized) applies the preference and never appends", async () => {
+    setTopic(stateRoot, "brove", 7);
+    const d = deps();
+    const { bridge, drained } = drive({ cfg: ctrlCfg, ...d }, [topicMsg("/notify cap on", 7)]);
+    await drained;
+    expect(d.sendReply).toHaveBeenCalledWith(7, expect.stringContaining("cap = on"));
+    expect(d.appendCaptainMessage).not.toHaveBeenCalled();
+    bridge.stop();
+  });
+
+  it("a normal message is still appended as a captain message", async () => {
+    setTopic(stateRoot, "brove", 7);
+    const d = deps();
+    const { bridge, drained } = drive({ cfg: ctrlCfg, ...d }, [topicMsg("ship it", 7)]);
+    await drained;
+    expect(d.appendCaptainMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ project: "brove", source: "telegram" }),
+    );
+    bridge.stop();
+  });
+});
