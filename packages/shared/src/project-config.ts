@@ -54,3 +54,16 @@ export function saveProjectOverride(name: string, patch: ProjectOverrideConfig, 
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(merged, null, 2) + "\n");
 }
+
+export const DEFAULT_NOTIFY: NotifyConfig = { active: false, cap: true, crew: "alert_only" };
+
+/** Built-in → global → project, per-key. Does NOT apply live state (bridge's job). */
+export function resolveNotify(
+  globalNotify: Partial<NotifyConfig> | undefined,
+  override: ProjectOverrideConfig,
+): NotifyConfig {
+  let n: NotifyConfig = { ...DEFAULT_NOTIFY };
+  if (globalNotify) n = deepMerge(n, globalNotify);
+  if (override.telegram?.notify) n = deepMerge(n, override.telegram.notify);
+  return n;
+}
