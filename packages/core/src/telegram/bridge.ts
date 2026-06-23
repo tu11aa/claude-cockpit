@@ -4,7 +4,7 @@
 import os from "node:os";
 import path from "node:path";
 import type { ControlEvent, TelegramConfig } from "@squadrant/shared";
-import { resolveNotify, loadProjectOverride } from "@squadrant/shared";
+import { resolveNotify, loadProjectOverride, saveProjectOverride } from "@squadrant/shared";
 import type { TelegramClient } from "./client.js";
 import { isAuthorized, isControlEnabled } from "./auth.js";
 import { parseCommand } from "./commands.js";
@@ -43,6 +43,18 @@ export interface TelegramBridgeOptions {
 const LONG_POLL_SEC = 50;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+const CREW_TIERS = ["all", "alert_only", "done_only", "none"];
+
+/** Parse a `/notify crew <tier>` or `/notify cap <on|off>` preference command.
+ *  Returns null for anything else (ordinary message or malformed). */
+export function parseNotifyPref(text: string): { dimension: "crew" | "cap"; value: string } | null {
+  const parts = text.trim().split(/\s+/);
+  if (parts[0]?.toLowerCase() !== "/notify") return null;
+  const dimension = parts[1]?.toLowerCase();
+  if ((dimension === "crew" || dimension === "cap") && parts[2]) return { dimension, value: parts[2].toLowerCase() };
+  return null;
+}
 
 export function createTelegramBridge(opts: TelegramBridgeOptions): TelegramBridge {
   const { cfg, stateRoot, client, appendCaptainMessage, log, ensureCaptainAlive, runCommand, sendReply } = opts;
@@ -136,6 +148,31 @@ export function createTelegramBridge(opts: TelegramBridgeOptions): TelegramBridg
       }
       setNotify(stateRoot, resolved.project, toggle);
       await reply(threadId, toggle ? `🔔 ${resolved.project} notifications ON` : `🔕 ${resolved.project} notifications OFF`);
+      return;
+    }
+
+    const pref = parseNotifyPref(text);
+    if (pref !== null) {
+      // Deliberate preference change — fail-closed, writes the per-project config
+      // file (not live state), never appended as a captain message.
+      if (!isControlEnabled(cfg) || !isAuthorized(fromId, cfg)) {
+        await reply(threadId, "⛔ not authorized");
+        return;
+      }
+      if (pref.dimension === "crew") {
+        if (!CREW_TIERS.includes(pref.value)) {
+          await reply(threadId, "crew must be all|alert_only|done_only|none");
+          return;
+        }
+        saveProjectOverride(resolved.project, { telegram: { notify: { crew: pref.value as never } } }, configRoot);
+      } else {
+        if (pref.value !== "on" && pref.value !== "off") {
+          await reply(threadId, "cap must be on|off");
+          return;
+        }
+        saveProjectOverride(resolved.project, { telegram: { notify: { cap: pref.value === "on" } } }, configRoot);
+      }
+      await reply(threadId, `✅ ${pref.dimension} = ${pref.value}`);
       return;
     }
 
