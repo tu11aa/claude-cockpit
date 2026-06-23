@@ -368,3 +368,48 @@ describe("inbound poll", () => {
     expect(logs.some((m) => m.includes("boom"))).toBe(true);
   });
 });
+
+describe("lastUserId passive capture", () => {
+  it("records m.from.id to state on an allowlisted inbound message", async () => {
+    const root = freshRoot();
+    setTopic(root, "demo", 100);
+    let n = 0;
+    const client: TelegramClient = {
+      sendMessage: async () => {},
+      createForumTopic: async () => 1,
+      getUpdates: async () => {
+        n++;
+        if (n === 1) return [{ update_id: 10, message: { chat: { id: -100111 }, message_thread_id: 100, text: "hello", from: { id: 777 } } } as never];
+        return [];
+      },
+      getMe: async () => ({ id: 0, username: "" }),
+      setMyCommands: async () => {},
+    };
+    const bridge = createTelegramBridge({ cfg, stateRoot: root, client, appendCaptainMessage: async () => {}, log: () => {} });
+    active = bridge;
+    bridge.start();
+    await waitFor(() => loadState(root).offset === 11);
+    expect(loadState(root).lastUserId).toBe(777);
+  });
+
+  it("does not record from.id for a non-allowlisted chat", async () => {
+    const root = freshRoot();
+    let n = 0;
+    const client: TelegramClient = {
+      sendMessage: async () => {},
+      createForumTopic: async () => 1,
+      getUpdates: async () => {
+        n++;
+        if (n === 1) return [{ update_id: 10, message: { chat: { id: -999999 }, message_thread_id: 100, text: "hi", from: { id: 888 } } } as never];
+        return [];
+      },
+      getMe: async () => ({ id: 0, username: "" }),
+      setMyCommands: async () => {},
+    };
+    const bridge = createTelegramBridge({ cfg, stateRoot: root, client, appendCaptainMessage: async () => {}, log: () => {} });
+    active = bridge;
+    bridge.start();
+    await waitFor(() => n >= 2);
+    expect(loadState(root).lastUserId).toBeUndefined();
+  });
+});

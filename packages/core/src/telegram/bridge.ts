@@ -10,7 +10,7 @@ import { isAuthorized, isControlEnabled } from "./auth.js";
 import { parseCommand, stripBotMention } from "./commands.js";
 import type { EnsureResult } from "./ensure-captain.js";
 import { formatInbound, formatLifecycle, topicName } from "./format.js";
-import { findProjectByThread, loadState, saveState, setNotify, setTopic, topicKey } from "./state.js";
+import { findProjectByThread, loadState, saveState, setLastUserId, setNotify, setTopic, topicKey } from "./state.js";
 import { tierIncludes } from "./tiers.js";
 
 export interface TelegramBridge {
@@ -194,6 +194,10 @@ export function createTelegramBridge(opts: TelegramBridgeOptions): TelegramBridg
     const m = u.message;
     if (!m || m.text === undefined) return;
     if (!cfg.chats.includes(m.chat.id)) return; // not an allowlisted chat (coarse filter)
+    // Passively capture the sender's user-id for setup auto-population (#user-id).
+    if (m.from?.id !== undefined && loadState(stateRoot).lastUserId !== m.from.id) {
+      setLastUserId(stateRoot, m.from.id);
+    }
     if (m.message_thread_id === undefined) {
       await handleGeneral(m.text, m.from?.id);
       return;

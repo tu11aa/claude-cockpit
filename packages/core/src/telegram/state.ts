@@ -9,6 +9,8 @@ export interface TelegramState {
   topics: Record<string, number>;
   /** key = project; value = true when active. Absent/false = MUTED (default). */
   notify: Record<string, boolean>;
+  /** Last seen inbound message sender — populated passively by the bridge poll. */
+  lastUserId?: number;
 }
 
 function statePath(stateRoot: string): string {
@@ -25,11 +27,13 @@ export function loadState(stateRoot: string): TelegramState {
   try {
     const raw = fs.readFileSync(statePath(stateRoot), "utf-8");
     const data = JSON.parse(raw) as Partial<TelegramState>;
-    return {
+    const result: TelegramState = {
       offset: typeof data.offset === "number" ? data.offset : 0,
       topics: data.topics ?? {},
       notify: data.notify ?? {},
     };
+    if (typeof data.lastUserId === "number") result.lastUserId = data.lastUserId;
+    return result;
   } catch {
     return { offset: 0, topics: {}, notify: {} };
   }
@@ -53,6 +57,12 @@ export function setTopic(
 
 export function isNotifyActive(stateRoot: string, project: string): boolean {
   return loadState(stateRoot).notify[project] === true;
+}
+
+export function setLastUserId(stateRoot: string, id: number): void {
+  const s = loadState(stateRoot);
+  s.lastUserId = id;
+  saveState(stateRoot, s);
 }
 
 export function setNotify(stateRoot: string, project: string, active: boolean): void {
