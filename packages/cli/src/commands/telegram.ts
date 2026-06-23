@@ -4,7 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { loadConfig, DEFAULT_CONFIG_PATH, saveProjectOverride, resolveNotify, loadProjectOverride, isQuieter } from "@squadrant/shared";
 import type { SquadrantConfig, TelegramConfig, NotifyConfig, CrewTier } from "@squadrant/shared";
-import { createTelegramClient, loadState, setTopic, topicKey, topicName, detectGroupAndUser, writeTelegramConfig, maskToken, isNotifyActive, setNotify } from "@squadrant/core";
+import { createTelegramClient, loadState, setTopic, topicKey, topicName, detectGroupAndUser, writeTelegramConfig, maskToken, isNotifyActive, setNotify, BOT_COMMANDS } from "@squadrant/core";
 import type { TelegramClient } from "@squadrant/core";
 
 /** Daemon state root (mirrors buildContext): ~/.config/squadrant/state. */
@@ -187,6 +187,10 @@ export async function runNotifyConfirmation(opts: {
   }
 }
 
+export async function runRegisterCommands(opts: { client: TelegramClient }): Promise<void> {
+  await opts.client.setMyCommands(BOT_COMMANDS);
+}
+
 export const telegramCommand = new Command("telegram")
   .description("Two-way Telegram integration: push crew events to a topic and reply into the captain pane");
 
@@ -305,8 +309,35 @@ telegramCommand
     } else {
       console.log(chalk.dim("Remote control: off (default). Re-run setup to enable later."));
     }
+
+    try {
+      await runRegisterCommands({ client });
+      console.log(chalk.dim("Registered the /command menu."));
+    } catch (e) {
+      console.log(chalk.yellow(`command-menu registration skipped: ${(e as Error).message}`));
+    }
+
     console.log();
     console.log(`Next: ${chalk.cyan("squadrant telegram link <project>")}`);
+  });
+
+telegramCommand
+  .command("register-commands")
+  .description("Register (or re-register) the bot's / command menu with Telegram")
+  .action(async () => {
+    const cfg = loadConfig().telegram;
+    if (!cfg) {
+      console.error(chalk.red("telegram config absent — run: squadrant telegram setup"));
+      process.exit(1);
+    }
+    const token = cfg.botToken ?? process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      console.error(chalk.red("no botToken in config and TELEGRAM_BOT_TOKEN is unset"));
+      process.exit(1);
+    }
+    const client = createTelegramClient({ token });
+    await runRegisterCommands({ client });
+    console.log(chalk.green(`registered ${BOT_COMMANDS.length} bot commands`));
   });
 
 telegramCommand
