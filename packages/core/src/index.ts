@@ -28,3 +28,4 @@ export * from "./group-dispatch.js";
 export * from "./launch-workspace.js";
 export * from "./side-session.js";
 export * from "./crew-spawn.js";
+export * from "./lifecycle-source.js";
