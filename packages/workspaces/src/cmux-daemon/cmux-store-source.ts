@@ -112,8 +112,8 @@ export class CmuxStoreSource implements LifecycleSource {
     this.readFile = opts.readFile ?? defaultReadFile;
     this.fileExists = opts.fileExists ?? existsSync;
     this.watchDir = opts.watchDir ?? defaultWatchDir;
-    this.scheduleTimer = opts.scheduleTimer ?? (setTimeout as CmuxStoreSourceOpts["scheduleTimer"]!);
-    this.cancelTimer = opts.cancelTimer ?? (clearTimeout as CmuxStoreSourceOpts["cancelTimer"]!);
+    this.scheduleTimer = opts.scheduleTimer ?? (setTimeout as NonNullable<CmuxStoreSourceOpts["scheduleTimer"]>);
+    this.cancelTimer = opts.cancelTimer ?? (clearTimeout as NonNullable<CmuxStoreSourceOpts["cancelTimer"]>);
     this.log = opts.log ?? (() => {});
   }
 
