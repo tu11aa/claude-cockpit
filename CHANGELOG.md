@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-28
+
+### Added
+
+- Native lifecycle ingestion (#333 Phase 1): squadrant now installs and owns its own Claude Code lifecycle hooks via a NativeHookSource (primary), registered namespaced and non-clobbering in `~/.claude/settings.json`, alongside a CodexAppServerSource adapter for the codex app-server and a CmuxStoreSource backup that reads `~/.cmuxterm`. A new internal `squadrant hooks claude <event>` CLI bridges Claude lifecycle events to the daemon. These run additively next to the existing cmux events bridge. ([#333](https://github.com/tu11aa/squadrant/issues/333))
+- Interactive no-arg `squad launch`: running `squad launch` with no project opens a multi-select and boots the chosen captains in parallel.
+
+### Fixed
+
+- First-turn drop regression (#333): AskUserQuestion was registered as an invalid top-level Claude hook event, which made Claude Code show a blocking "Settings Warning" modal at session start that swallowed a freshly spawned crew's first turn. It is now registered correctly as a PreToolUse hook with `matcher: "AskUserQuestion"`. ([#333](https://github.com/tu11aa/squadrant/issues/333))
+- opencode multi-option picker is now detected as CREW BLOCKED so the captain is prompted to choose, instead of the crew stalling silently while the daemon shows it as working.
+
 ## [0.12.1] - 2026-06-26
 
 ### Fixed

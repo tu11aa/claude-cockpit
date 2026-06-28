@@ -5,4 +5,8 @@ export * from "./workspaces/index.js";
 export { CmuxEventsBridge, deriveRunState } from "./cmux-daemon/events-bridge.js";
 export type { RunState, CmuxEventsChild, CmuxAgentHook, CmuxEventsBridgeDeps } from "./cmux-daemon/events-bridge.js";
 export { DaemonCmux } from "./cmux-daemon/daemon-cmux.js";
+export { CmuxStoreSource } from "./cmux-daemon/cmux-store-source.js";
+export type { CmuxStoreSourceOpts } from "./cmux-daemon/cmux-store-source.js";
+export { NativeHookSource, installClaudeHooks, mapSubToLifecycle } from "./native-hooks/native-hook-source.js";
+export type { NativeHookSourceOpts, ClaudeHooksInstallOpts } from "./native-hooks/native-hook-source.js";
 export { getFreePort, listProjectCrews, findCrew, resolveCaptainWorkspace, sendFirstTurnWhenReady, confirmedSendToPane } from "./crew-pane.js";
