@@ -30,8 +30,8 @@ export function partitionByYesterday(
 
 export async function selectCaptainsInteractive(
   entries: CaptainEntry[],
+  yesterday: string = getYesterday(),
 ): Promise<string[]> {
-  const yesterday = getYesterday();
   const { yesterday: yesterdayEntries, rest: restEntries } = partitionByYesterday(entries, yesterday);
 
   if (yesterdayEntries.length === 0) {

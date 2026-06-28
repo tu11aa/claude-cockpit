@@ -71,7 +71,7 @@ describe("selectCaptainsInteractive", () => {
     const yesterdayEntries = MOCK_ENTRIES.filter(e => e.lastLaunched === "2026-06-26");
     mockCheckbox.mockResolvedValue(["squadrant"]);
 
-    const result = await selectCaptainsInteractive(MOCK_ENTRIES);
+    const result = await selectCaptainsInteractive(MOCK_ENTRIES, "2026-06-26");
 
     expect(result).toEqual(["squadrant"]);
 
@@ -96,7 +96,7 @@ describe("selectCaptainsInteractive", () => {
       .mockResolvedValueOnce(["brove", "__show_all__"])
       .mockResolvedValueOnce(["brove", "park"]);
 
-    const result = await selectCaptainsInteractive(MOCK_ENTRIES);
+    const result = await selectCaptainsInteractive(MOCK_ENTRIES, "2026-06-26");
 
     expect(result).toEqual(["brove", "park"]);
     expect(mockCheckbox).toHaveBeenCalledTimes(2);
@@ -112,7 +112,7 @@ describe("selectCaptainsInteractive", () => {
     mockCheckbox.mockResolvedValue(["oneplan", "park"]);
 
     const entriesWithoutYesterday = MOCK_ENTRIES.map(e => ({ ...e, lastLaunched: null }));
-    const result = await selectCaptainsInteractive(entriesWithoutYesterday);
+    const result = await selectCaptainsInteractive(entriesWithoutYesterday, "2026-06-26");
 
     expect(result).toEqual(["oneplan", "park"]);
 
@@ -130,7 +130,7 @@ describe("selectCaptainsInteractive", () => {
     const allYesterday = MOCK_ENTRIES.map(e => ({ ...e, lastLaunched: "2026-06-26" }));
     mockCheckbox.mockResolvedValue(["squadrant", "brove"]);
 
-    const result = await selectCaptainsInteractive(allYesterday);
+    const result = await selectCaptainsInteractive(allYesterday, "2026-06-26");
 
     expect(result).toEqual(["squadrant", "brove"]);
 
