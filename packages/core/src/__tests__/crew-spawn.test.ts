@@ -31,7 +31,8 @@ vi.mock("node:fs", async (importOriginal) => {
   // Default: existsSync returns false so codex role file is treated as absent.
   const existsSync = vi.fn().mockReturnValue(false);
   const readFileSync = vi.fn().mockReturnValue("");
-  return { ...actual, existsSync, readFileSync, default: { ...actual, existsSync, readFileSync } };
+  const copyFileSync = vi.fn();
+  return { ...actual, existsSync, readFileSync, copyFileSync, default: { ...actual, existsSync, readFileSync, copyFileSync } };
 });
 
 // Prevent reapCrewChildren from running real `ps auxE` during close tests.
@@ -43,6 +44,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 // ─── imports (after mock declarations) ───────────────────────────────────────
 
+import * as nodefs from "node:fs";
 import {
   runCrewSpawn,
   runCrewSend,
@@ -134,7 +136,7 @@ function makeSpawnDeps(runtime: RuntimeDriver, agent: ResolvedAgent): CrewSpawnD
     dispatchCrew: vi.fn().mockResolvedValue(rec),
     writeSettingsLocal: vi.fn(),
     writeOpencodeConfig: vi.fn().mockReturnValue("/fake/opencode.json"),
-    sendFirstTurn: vi.fn().mockResolvedValue(undefined),
+    sendFirstTurn: vi.fn().mockResolvedValue({ delivered: true }),
     getFreePort: vi.fn().mockResolvedValue(9876),
     sendCodexFirstTurn: vi.fn().mockResolvedValue(undefined),
     onRouted: vi.fn(),
@@ -150,6 +152,7 @@ beforeEach(() => {
   );
   resolveWorktreeBaseMock.mockReturnValue("main");
   loadConfigMock.mockReturnValue(makeConfig());
+  vi.mocked(nodefs.copyFileSync).mockReset();
 });
 
 // ─── runCrewSpawn ────────────────────────────────────────────────────────────
@@ -236,6 +239,61 @@ describe("runCrewSpawn", () => {
       );
     });
 
+    // #466: when sendFirstTurn resolves { delivered: false }, runCrewSpawn must NOT
+    // report clean success — the caller gets the pane ref (crew is usable via send)
+    // but the warning is surfaced via stderr so the captain knows to re-send.
+    it("writes stderr warning when sendFirstTurn returns { delivered: false } (#466)", async () => {
+      const config = makeConfig();
+      const runtime = makeRuntime();
+      const agent = makeAgent("claude");
+      const deps = makeSpawnDeps(runtime, agent);
+      deps.sendFirstTurn = vi.fn().mockResolvedValue({ delivered: false });
+
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        await runCrewSpawn({ project: PROJECT, task: "fix the bug" }, config, deps);
+        const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join("");
+        expect(stderrOutput).toMatch(/first turn.*not.*delivered|not.*delivered.*first turn/i);
+        expect(stderrOutput).toMatch(/crew send/i);
+      } finally {
+        stderrSpy.mockRestore();
+      }
+    });
+
+    // #466: when sendFirstTurn resolves { delivered: true }, emitEvent is called
+    // with task.first-turn.confirmed so the daemon can stamp firstTurnConfirmedAt.
+    it("emits task.first-turn.confirmed when sendFirstTurn returns { delivered: true } (#466)", async () => {
+      const config = makeConfig();
+      const runtime = makeRuntime();
+      const agent = makeAgent("claude");
+      const deps = makeSpawnDeps(runtime, agent);
+      deps.sendFirstTurn = vi.fn().mockResolvedValue({ delivered: true });
+      const emitEvent = vi.fn().mockResolvedValue(undefined);
+      deps.emitEvent = emitEvent;
+
+      await runCrewSpawn({ project: PROJECT, task: "fix the bug" }, config, deps);
+
+      expect(emitEvent).toHaveBeenCalledWith(
+        PROJECT,
+        expect.objectContaining({ type: "task.first-turn.confirmed", id: "task-001" }),
+      );
+    });
+
+    // #466: when emitEvent is absent (not wired), delivered=true is a no-op —
+    // the spawn still succeeds (backward-compat for callers without the dep).
+    it("succeeds without error when emitEvent is absent and delivered=true (#466)", async () => {
+      const config = makeConfig();
+      const runtime = makeRuntime();
+      const agent = makeAgent("claude");
+      const deps = makeSpawnDeps(runtime, agent);
+      deps.sendFirstTurn = vi.fn().mockResolvedValue({ delivered: true });
+      // emitEvent intentionally not set
+
+      await expect(
+        runCrewSpawn({ project: PROJECT, task: "fix the bug" }, config, deps),
+      ).resolves.toBeDefined();
+    });
+
     it("respects permissionMode from config", async () => {
       const config = makeConfig({ permissions: { command: "auto", captain: "auto", crew: "auto" } });
       const runtime = makeRuntime();
@@ -269,6 +327,96 @@ describe("runCrewSpawn", () => {
         expect.anything(),
         expect.stringContaining(`cd '${PROJ_PATH}'`),
       );
+    });
+
+    // #458: --task-file with isolated worktree
+    describe("--task-file with isolated worktree (#458)", () => {
+      it("copies task file into worktree root and sends short Read first-turn", async () => {
+        const config = makeConfig();
+        const runtime = makeRuntime();
+        const agent = makeAgent("claude");
+        const deps = makeSpawnDeps(runtime, agent);
+
+        await runCrewSpawn(
+          { project: PROJECT, task: "full brief contents", taskFile: "/tmp/task-brief.md" },
+          config,
+          deps,
+        );
+
+        const worktreePath = `${PROJ_PATH}/.worktrees/${PROJECT}-crew-1`;
+        expect(vi.mocked(nodefs.copyFileSync)).toHaveBeenCalledWith(
+          "/tmp/task-brief.md",
+          `${worktreePath}/task-brief.md`,
+        );
+        expect(deps.sendFirstTurn).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.stringContaining("Read ./task-brief.md"),
+          expect.any(String),
+        );
+        // First turn must NOT inline the full file content
+        expect(deps.sendFirstTurn).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.not.stringContaining("full brief contents"),
+          expect.any(String),
+        );
+      });
+
+      it("does NOT copy task file for --shared spawn (preserves current behavior)", async () => {
+        const config = makeConfig();
+        const runtime = makeRuntime();
+        const agent = makeAgent("claude");
+        const deps = makeSpawnDeps(runtime, agent);
+
+        await runCrewSpawn(
+          { project: PROJECT, task: "full brief contents", taskFile: "/tmp/task-brief.md", shared: true },
+          config,
+          deps,
+        );
+
+        expect(vi.mocked(nodefs.copyFileSync)).not.toHaveBeenCalled();
+        // Shared spawn still inlines the task text
+        expect(deps.sendFirstTurn).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.stringContaining("full brief contents"),
+          expect.any(String),
+        );
+      });
+
+      it("does NOT copy when no taskFile is provided (preserves current behavior)", async () => {
+        const config = makeConfig();
+        const runtime = makeRuntime();
+        const agent = makeAgent("claude");
+        const deps = makeSpawnDeps(runtime, agent);
+
+        await runCrewSpawn({ project: PROJECT, task: "direct positional task" }, config, deps);
+
+        expect(vi.mocked(nodefs.copyFileSync)).not.toHaveBeenCalled();
+        expect(deps.sendFirstTurn).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.stringContaining("direct positional task"),
+          expect.any(String),
+        );
+      });
+
+      it("does NOT copy for stdin (taskFile = '-')", async () => {
+        const config = makeConfig();
+        const runtime = makeRuntime();
+        const agent = makeAgent("claude");
+        const deps = makeSpawnDeps(runtime, agent);
+
+        await runCrewSpawn(
+          { project: PROJECT, task: "stdin task content", taskFile: "-" },
+          config,
+          deps,
+        );
+
+        expect(vi.mocked(nodefs.copyFileSync)).not.toHaveBeenCalled();
+        expect(deps.sendFirstTurn).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.stringContaining("stdin task content"),
+          expect.any(String),
+        );
+      });
     });
   });
 
@@ -342,6 +490,34 @@ describe("runCrewSpawn", () => {
         expect.stringContaining("squadrant crew attach task-001"),
       );
       expect(deps.sendCodexFirstTurn).toHaveBeenCalledWith("task-001", "do work");
+    });
+
+    it("sends short Read first-turn to codex when taskFile is set for isolated worktree", async () => {
+      const config = makeConfig();
+      const runtime = makeRuntime();
+      const agent = makeAgent("codex");
+      const deps = makeSpawnDeps(runtime, agent);
+      deps.resolveAgent = vi.fn().mockReturnValue(agent);
+
+      await runCrewSpawn(
+        { project: PROJECT, task: "full brief", taskFile: "/tmp/codex-brief.md", agent: "codex", agentExplicit: true },
+        config,
+        deps,
+      );
+
+      expect(vi.mocked(nodefs.copyFileSync)).toHaveBeenCalledWith(
+        "/tmp/codex-brief.md",
+        expect.stringContaining("codex-brief.md"),
+      );
+      // sendCodexFirstTurn receives the short "Read" message, not the full content
+      expect(deps.sendCodexFirstTurn).toHaveBeenCalledWith(
+        "task-001",
+        expect.stringContaining("Read ./codex-brief.md"),
+      );
+      expect(deps.sendCodexFirstTurn).toHaveBeenCalledWith(
+        "task-001",
+        expect.not.stringContaining("full brief"),
+      );
     });
   });
 
@@ -468,7 +644,7 @@ describe("runCrewSend", () => {
   it("uses deps.sendToPane when provided, bypassing runtime.sendToPane", async () => {
     const existing = { ...makePaneRef("5"), title: "🔧 myproj:crew-1" };
     const runtime = makeRuntime("workspace:1", [existing]);
-    const injectedSend = vi.fn().mockResolvedValue(undefined);
+    const injectedSend = vi.fn().mockResolvedValue({ delivered: true });
     await runCrewSend(PROJECT, "crew-1", "big message", runtime, "workspace:1", {
       listTasks: vi.fn().mockResolvedValue([]),
       emitEvent: vi.fn(),

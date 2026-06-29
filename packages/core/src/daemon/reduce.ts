@@ -73,6 +73,10 @@ export const DEFAULT_TASK_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 // than this are pruned from the store during sweep().
 export const TERMINAL_RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+// #457: Max terminal records to keep per project. Bounds accumulation for
+// short-lived test sessions where many tasks finish before the 7-day TTL.
+export const TERMINAL_RECORD_KEEP_PER_PROJECT = 20;
+
 // 'awaiting-input' is an attention state: entering it (idle watchdog OR a
 // Stop-hook turn boundary) fires exactly one accurate CREW IDLE push. The
 // firePush prev===next guard keeps it from re-firing while the task sits idle.
@@ -236,6 +240,7 @@ const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set([
   "task.reattached", "task.reopened",
   "task.stalled", "task.idle", "task.quiet", "task.timeout", "task.reconcile-failed",
   "task.cancelled", "task.session.ended",
+  "task.first-turn.confirmed",  // #466: delivery confirmation
 ]);
 
 export function createDaemon(deps: DaemonDeps) {
@@ -370,6 +375,20 @@ export function createDaemon(deps: DaemonDeps) {
     async sweep(): Promise<void> {
       const t = now();
       const surfaceAlive = deps.isSurfaceAlive ?? (async () => "unknown" as const);
+
+      // #457: Per-project overflow prune — keep only the most-recent K terminal
+      // records. Bounds accumulation for short-lived sessions where many tasks
+      // finish before the 7-day TTL expires.
+      const projects = new Set(store.listAll().map((r) => r.project));
+      for (const project of projects) {
+        const terminal = store.list(project)
+          .filter((r) => TERMINAL_STATES.has(r.state))
+          .sort((a, b) => b.lastHeartbeat - a.lastHeartbeat);
+        for (const r of terminal.slice(TERMINAL_RECORD_KEEP_PER_PROJECT)) {
+          store.delete(r.project, r.id);
+        }
+      }
+
       for (const r of store.listAll()) {
         // #378: GC terminal records whose last heartbeat is older than the TTL.
         if (TERMINAL_STATES.has(r.state) && t - r.lastHeartbeat > TERMINAL_RECORD_TTL_MS) {
@@ -391,7 +410,16 @@ export function createDaemon(deps: DaemonDeps) {
             // Terminalize first — persisted to store so any future daemon instance
             // sees a terminal record and skips it (flood-proof across restarts).
             store.put({ ...r, state: "cancelled", lastEvent: "sweep.task-timeout" });
-            if (deps.notify) {
+            // #457: suppress ghost CREW TIMEOUT for interactive tasks whose surface
+            // is provably gone — they were already abandoned; terminalize silently.
+            // Headless tasks have no cmux surface so always notify.
+            // "unknown" (cmux down / transient) → notify conservatively.
+            let shouldNotify = true;
+            if (r.mode === "interactive") {
+              const liveness = await surfaceAlive(r);
+              if (liveness === "gone") shouldNotify = false;
+            }
+            if (deps.notify && shouldNotify) {
               try {
                 const p = deps.notify({ project: r.project, message: msg, record: r, event: synthEvent });
                 if (p && typeof (p as Promise<void>).catch === "function") {
@@ -440,6 +468,8 @@ export function createDaemon(deps: DaemonDeps) {
         // during pure model thinking). Surface a distinct, non-alarming nudge —
         // NOT 'awaiting-input' (the turn never ended; real CREW IDLE comes only
         // from the Stop hook). State stays `working`; notify once per episode.
+        // #466: if firstTurnConfirmedAt is unset the crew may never have received
+        // its first task — emit CREW UNDELIVERED instead of "deep thinking".
         if (r.mode === "interactive" && r.state === "working" && !r.pendingTool) {
           const liveness = r.attempts.at(-1)?.lastHeartbeatAt ?? r.lastHeartbeat;
           const quiet = t - liveness;
@@ -447,9 +477,16 @@ export function createDaemon(deps: DaemonDeps) {
             if (deps.notify && quietNotifiedAt.get(r.id) !== liveness) {
               quietNotifiedAt.set(r.id, liveness);
               const tag = crewTag(r);
-              const mins = Math.max(1, Math.round(quiet / 60000));
-              const message = `CREW QUIET ${tag}: working ~${mins}min with no tool activity — likely deep thinking (no reply expected yet).`;
               const synthEvent: ControlEvent = { type: "task.quiet", id: r.id, quietMs: quiet };
+              let message: string;
+              if (!r.firstTurnConfirmedAt) {
+                // #466: no confirmed delivery → crew may be sitting at an empty
+                // prompt. Alert distinctly so the captain can re-send the task.
+                message = `⚠️ CREW UNDELIVERED ${tag}: first turn may not have landed (0 activity) — re-send the task or check the spawn.`;
+              } else {
+                const mins = Math.max(1, Math.round(quiet / 60000));
+                message = `CREW QUIET ${tag}: working ~${mins}min with no tool activity — likely deep thinking (no reply expected yet).`;
+              }
               try {
                 const p = deps.notify({ project: r.project, message, record: r, event: synthEvent });
                 if (p && typeof (p as Promise<void>).catch === "function") (p as Promise<void>).catch(() => {});
