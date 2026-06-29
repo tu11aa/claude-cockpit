@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { sendRequest } from "@squadrant/core";
 import { ensureDaemon } from "@squadrant/core";
 import type { ControlEvent, Mode, Provider, TaskRecord } from "@squadrant/shared";
+import { TERMINAL_STATES } from "@squadrant/shared";
 import { mapClaudeHookToEvent } from "@squadrant/agents";
 import { filterTasks, formatCompactTasks } from "./crew-output.js";
 import { crewAttachCommand } from "./crew-attach.js";
@@ -210,7 +211,17 @@ export function addControlPlaneCrewCommands(crew: Command): void {
     .option("--state-only <taskId>", "Print just the state string for a single task")
     .option("--purge <taskId>", "Purge a task record from the store (default: only terminal records)")
     .option("--force", "Force-purge a non-terminal record (use with --purge)")
-    .action(async (project: string, opts: { json?: boolean; id?: string; state?: string; stateOnly?: string; purge?: string; force?: boolean }) => {
+    .option("--all-terminal", "Purge all terminal (done/cancelled/failed) records for the project")
+    .action(async (project: string, opts: { json?: boolean; id?: string; state?: string; stateOnly?: string; purge?: string; force?: boolean; allTerminal?: boolean }) => {
+      if (opts.allTerminal) {
+        const tasks = (await squadrantdCall({ kind: "list", project })) as TaskRecord[];
+        const terminal = tasks.filter((t) => TERMINAL_STATES.has(t.state as any));
+        for (const t of terminal) {
+          await squadrantdCall({ kind: "purge", project, id: t.id, force: false });
+        }
+        console.log(`purged ${terminal.length} terminal record(s)`);
+        return;
+      }
       if (opts.purge) {
         const r = await squadrantdCall({ kind: "purge", project, id: opts.purge, force: opts.force ?? false }) as TaskRecord;
         console.log(`purged ${r.provider}/${r.id} (was ${r.state})`);
