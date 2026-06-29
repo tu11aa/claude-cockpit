@@ -644,7 +644,7 @@ describe("runCrewSend", () => {
   it("uses deps.sendToPane when provided, bypassing runtime.sendToPane", async () => {
     const existing = { ...makePaneRef("5"), title: "🔧 myproj:crew-1" };
     const runtime = makeRuntime("workspace:1", [existing]);
-    const injectedSend = vi.fn().mockResolvedValue(undefined);
+    const injectedSend = vi.fn().mockResolvedValue({ delivered: true });
     await runCrewSend(PROJECT, "crew-1", "big message", runtime, "workspace:1", {
       listTasks: vi.fn().mockResolvedValue([]),
       emitEvent: vi.fn(),

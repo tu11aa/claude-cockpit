@@ -454,7 +454,7 @@ export async function runCrewSend(
     // runtime.sendToPane so the caller can inject paste-settle-Enter hardening.
     // Falls back to runtime.sendToPane when absent (preserves existing behaviour
     // for callers that don't inject it, e.g. unit tests).
-    sendToPane?: (pane: PaneRef, message: string) => Promise<void>;
+    sendToPane?: (pane: PaneRef, message: string) => Promise<{ delivered: boolean }>;
   },
 ): Promise<void> {
   const crew = await findCrewPane(runtime, workspaceId, project, name);
@@ -479,8 +479,11 @@ export async function runCrewSend(
     // Swallow daemon errors so crews without a daemon or offline daemon
     // still receive the sent message.
   }
-  const deliver = deps.sendToPane ?? ((pane, msg) => runtime.sendToPane(pane, msg));
-  await deliver(crew, message);
+  const deliver = deps.sendToPane ?? ((pane, msg) => runtime.sendToPane(pane, msg).then(() => ({ delivered: true })));
+  const { delivered } = await deliver(crew, message);
+  if (!delivered) {
+    process.stderr.write(`⚠️  Message not delivered to crew '${name}' — use 'squadrant crew send ${project} ${name}' to re-send.\n`);
+  }
 }
 
 export async function runCrewRead(
