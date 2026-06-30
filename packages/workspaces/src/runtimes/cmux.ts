@@ -314,6 +314,34 @@ export function classifySendOutcome(payload: string, postBox: string | null): st
   return "unknown";
 }
 
+export type DraftLiveness = "real-draft" | "no-draft" | "inconclusive";
+
+/**
+ * Pure probe-liveness decision extracted for unit testing (#258).
+ * Given `before` / `after` raw box readings (from readInputBoxRaw) around a
+ * single backspace, classify whether a real user draft was present.
+ *
+ * Step-1 version: mirrors the current inline condition verbatim so existing
+ * behaviour is unchanged; tests can assert the false-negatives as failing.
+ * Step-2 will harden this into grapheme-aware + inconclusive-defers.
+ */
+export function classifyDraftLiveness(
+  before: string | null,
+  after: string | null,
+): DraftLiveness {
+  if (
+    before !== null &&
+    after !== null &&
+    after.length > 0 &&
+    after === before.slice(0, -1)
+  ) {
+    return "real-draft";
+  }
+  // Current behaviour: all other cases fall through to deliver. Step-2 will
+  // split this into 'no-draft' (ghost dismissed) vs 'inconclusive' (defer).
+  return "no-draft";
+}
+
 export function createCmuxDriver(): RuntimeDriver {
   return {
     name: "cmux",
@@ -559,28 +587,28 @@ export function createCmuxDriver(): RuntimeDriver {
       if (!opts?.probe) throw new DeferDelivery(draft);
 
       // #302 buffer-liveness probe (replaces the old destructive backspace×N
-      // clear + re-paste, which MATERIALIZED ghost suggestions). A real draft is
-      // the ONLY thing that yields the "last char removed, still non-empty"
-      // signature under ONE backspace (verified live, CC 2.1.x); a ghost either
-      // stays invariant or dismisses to empty. So we PROTECT only on that exact
-      // signature, and we NEVER re-paste screen-read content.
+      // clear + re-paste, which MATERIALIZED ghost suggestions). classifyDraftLiveness
+      // decides from the before/after box readings whether a real draft is present.
+      // #258: Step-1 refactor — behaviour unchanged; Step-2 hardens the classifier.
       const before = readInputBoxRaw(screen);
       await cmux(["send-key", "--workspace", ws, "--surface", sf, "backspace"]);
       let afterScreen = "";
       try {
         afterScreen = await cmux(["read-screen", "--workspace", ws, "--surface", sf]);
-      } catch { /* unreadable after probe — treat as no real draft, fall through to deliver */ }
+      } catch { /* unreadable after probe — classifyDraftLiveness receives null, returns no-draft */ }
       const after = readInputBoxRaw(afterScreen);
 
-      if (before !== null && after !== null && after.length > 0 && after === before.slice(0, -1)) {
+      const liveness = classifyDraftLiveness(before, after);
+      if (liveness === "real-draft") {
         // Confirmed REAL draft. Restore the single char our probe removed (NOT a
         // full re-paste — at most one known char), then defer. Never clobber, and
         // a ghost can never reach this branch, so it can never be materialized.
-        await cmux(["send", "--workspace", ws, "--surface", sf, before.slice(-1)]);
+        await cmux(["send", "--workspace", ws, "--surface", sf, before!.slice(-1)]);
         throw new DeferDelivery(draft);
       }
 
-      // No real draft (ghost dismissed/invariant, or buffer now empty) → deliver.
+      // 'no-draft' (and currently 'inconclusive') → deliver.
+      // Step-2 will make 'inconclusive' defer to protect real trailing-space/emoji drafts.
       await deliver();
     },
 

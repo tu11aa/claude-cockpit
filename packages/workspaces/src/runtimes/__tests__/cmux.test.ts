@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createCmuxDriver, sanitizeForCmuxSend, parseDraftFromScreen, classifyStartupSurface, classifySendOutcome } from "../cmux.js";
+import { createCmuxDriver, sanitizeForCmuxSend, parseDraftFromScreen, classifyStartupSurface, classifySendOutcome, classifyDraftLiveness } from "../cmux.js";
 import { DeferDelivery } from "@squadrant/core";
 
 const execFileMock = vi.hoisted(() => vi.fn());
@@ -1221,5 +1221,49 @@ describe("classifyStartupSurface (#292 startup-readiness classifier)", () => {
   it("prefers 'working' over 'idle' when both chrome and a live turn are present", () => {
     // The 258 fixture shape: idle-looking input box but an active spinner above.
     expect(classifyStartupSurface(WORKING_STATUS)).toBe("working");
+  });
+});
+
+// #258 probe false-negative cases — RED tests (Step-1: assert DESIRED behavior
+// which FAILS against the current slice(0,-1) logic).
+//
+// The current classifier misses two false-negative triggers and would fall
+// through to deliver() — clobbering a real in-progress user draft:
+//
+//  1. trailing-space: readInputBoxRaw trims trailing whitespace, so a draft
+//     ending in " " produces before="hello" AFTER the trim. Backspace removes
+//     the space from the terminal; box now reads "hello" too → after="hello".
+//     before === after (looks invariant), NOT before.slice(0,-1) → 'no-draft'
+//     → deliver → CLOBBER.
+//
+//  2. trailing emoji (wide/surrogate-pair char): backspace removes one grapheme
+//     ("😀" = U+1F600 = 😀); after="hello " trimmed to "hello".
+//     before.slice(0,-1) removes only the low surrogate (\uDE00), yielding
+//     "hello \uD83D" (broken) ≠ "hello" → 'no-draft' → deliver → CLOBBER.
+//
+// These tests FAIL on the current Step-1 classifier (it returns 'no-draft' for
+// both). They become GREEN in Step-2 after the fix.
+describe("classifyDraftLiveness (#258 probe false-negative detection)", () => {
+  it("returns 'real-draft' for ASCII draft that is 1 char shorter (sanity: positive detection still works)", () => {
+    // "hello world" → backspace removes 'd' → "hello worl"
+    expect(classifyDraftLiveness("hello world", "hello worl")).toBe("real-draft");
+  });
+
+  it("trailing-space: before='hello', after='hello' → 'inconclusive' (should NOT be no-draft)", () => {
+    // User typed "hello " — readInputBoxRaw trims → before="hello".
+    // Backspace removes the space from the terminal box: renders "hello" → after="hello".
+    // Current logic: after !== before.slice(0,-1) ("hell") → 'no-draft' → delivers → CLOBBER.
+    // Desired: 'inconclusive' — ambiguous between ghost-invariant and trailing-space draft;
+    // MUST defer rather than risk clobbering the human's real content.
+    expect(classifyDraftLiveness("hello", "hello")).toBe("inconclusive");
+  });
+
+  it("trailing emoji (surrogate pair): before='hello \\uD83D\\uDE00', after='hello' → 'real-draft'", () => {
+    // User typed "hello 😀" (U+1F600 = surrogate pair 😀).
+    // readInputBoxRaw: before="hello 😀" (no trailing whitespace to trim).
+    // Backspace removes the 😀 grapheme; terminal now shows "hello " → trimmed → after="hello".
+    // Current logic: before.slice(0,-1) = "hello \uD83D" (broken surrogate) ≠ "hello" → 'no-draft' → CLOBBER.
+    // Desired: 'real-draft' (grapheme-aware detection: drop last grapheme "😀" → "hello " → trim → "hello").
+    expect(classifyDraftLiveness("hello 😀", "hello")).toBe("real-draft");
   });
 });
