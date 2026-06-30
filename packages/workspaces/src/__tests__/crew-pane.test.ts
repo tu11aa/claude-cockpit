@@ -828,6 +828,32 @@ describe("sendFirstTurnWhenReady — gate requires CC initialized, not just ❯ 
     // AFTER fix:  extended budget reaches the initialized box → delivered.
     expect(result).toEqual({ delivered: true });
   });
+
+  // pact-network's ACTUAL case: crews cold-init UNDER LOAD, so CC can take 30–60s to
+  // become input-ready (captains boot unloaded in 5–15s — captain parity is too short
+  // here). CC initializes at ~60s of polls. The readiness wait must reach it BEFORE
+  // the confirmedSendToPane fallback blind-fires into a still-cold box. The strong
+  // CC-initialized gate makes a long budget safe: it only waits as long as CC actually
+  // needs, and a crashed/never-ready CC still caps out at the budget.
+  it("delivers when a slow-under-load crew becomes CC-initialized at ~60s (#466 pact-network case)", async () => {
+    let n = 0;
+    readPaneScreen.mockImplementation(async () => {
+      n++;
+      if (n <= 78) return COLD_BOX;     // ~60s of cold-init under load: box up, NOT initialized
+      if (n <= 81) return READY_BOX;    // CC finally initialized (Ctx Used) → readiness + preSend
+      if (n <= 83) return DRAFT_READY;  // paste rendered in box
+      return READY_BOX;                 // box empties after Enter → submitted
+    });
+
+    const promise = sendFirstTurnWhenReady(rt(), pane, "task text", "$ launch");
+    await vi.advanceTimersByTimeAsync(95000);
+    const result = await promise;
+
+    // BEFORE fix: 30s budget times out at ~poll 38 → confirmedSendToPane fires while
+    //             CC is still cold → keystrokes dropped → delivered:false.
+    // AFTER fix:  90s budget reaches the initialized box at ~poll 80 → delivered.
+    expect(result).toEqual({ delivered: true });
+  });
 });
 
 describe("confirmedSendToPane — screen change without sawDraft is NOT delivery (#466-single defect 3)", () => {
