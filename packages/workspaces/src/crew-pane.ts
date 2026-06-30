@@ -13,13 +13,17 @@ import type { TurnAcceptanceConfig } from "@squadrant/core";
 // Poll-based first-turn delivery timing constants.
 const SEND_FIRST_TURN_FLOOR_MS = 1500;
 const POLL_INTERVAL_MS = 750;
-// #466 residual: 30s matches the captain startup path's readyTimeoutMs
-// (deliverStartupPrompt). A crew in a fresh worktree with claude-mem's MCP server
-// loading under machine load can take >20s to reach the input-ready state; the old
-// 20s budget timed out into the cold-init box and blind-fired keystrokes that were
-// dropped. The gate below (CC-initialized, not just a ❯ box) needs this headroom to
-// observe the surface actually become ready instead of giving up early.
-const SEND_FIRST_TURN_TIMEOUT_MS = 30000;
+// #466 residual: 90s readiness cap. Captains boot UNLOADED (5–15s, hence their
+// 30s readyTimeoutMs), but crews cold-init UNDER LOAD in a fresh worktree with
+// claude-mem's MCP server loading — that can take 30–60s to reach input-ready
+// (pact-network's actual case). A captain-parity 30s budget timed out into the
+// still-cold box and the confirmedSendToPane fallback blind-fired keystrokes that
+// were dropped. The strong CC-initialized gate below makes a generous cap safe: it
+// only ever waits as long as CC actually needs (delivery fires the instant the
+// surface is ready), and a crashed/never-ready CC still caps out here. 90s sits
+// well under the daemon's 5min CREW UNDELIVERED watchdog, so a genuine failure is
+// still surfaced.
+const SEND_FIRST_TURN_TIMEOUT_MS = 90000;
 const POST_SEND_CHECK_MS = 750;
 
 // #235 Confirm-on-delivery constants for splash-gated agents (opencode).
