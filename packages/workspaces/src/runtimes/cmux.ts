@@ -235,7 +235,10 @@ export function hasCCInputBox(screen: string): boolean {
  * parseDraftFromScreen this captures EVERY content line, so a multi-line draft's
  * change on its last line is not missed.
  */
-export function readInputBoxRaw(screen: string): string | null {
+export function readInputBoxRaw(
+  screen: string,
+  opts?: { trim?: boolean },
+): string | null {
   if (!screen) return null;
   const lines = screen.split(/\r?\n/);
   const HR_RE = /^\s*─{10,}\s*$/;
@@ -255,7 +258,10 @@ export function readInputBoxRaw(screen: string): string | null {
     s = s.replace(/\s*[▌█▔▎▏]+\s*$/, "");    // drop a trailing cursor glyph
     parts.push(s);
   }
-  return parts.join("").replace(/\s+$/, ""); // trim only the trailing edge
+  const joined = parts.join("");
+  // Default: trim trailing whitespace. Pass { trim: false } to preserve it —
+  // used by the probe branch to detect whether a backspace was a no-op (#258).
+  return opts?.trim === false ? joined : joined.replace(/\s+$/, "");
 }
 
 // #292: Claude Code renders a persistent bottom status block once its TUI is past
@@ -607,7 +613,10 @@ export function createCmuxDriver(): RuntimeDriver {
 
       // #302 buffer-liveness probe. classifyDraftLiveness decides from the
       // before/after box readings whether a real draft is present (#258 fix).
+      // Capture both trimmed (for classification) and untrimmed (for no-op
+      // detection in the inconclusive branch) before sending the backspace.
       const before = readInputBoxRaw(screen);
+      const rawBefore = readInputBoxRaw(screen, { trim: false });
       await cmux(["send-key", "--workspace", ws, "--surface", sf, "backspace"]);
       // 50ms settle: give the TUI time to re-render before reading back the
       // result. Without this, a too-fast read may still show the pre-backspace
@@ -618,6 +627,7 @@ export function createCmuxDriver(): RuntimeDriver {
         afterScreen = await cmux(["read-screen", "--workspace", ws, "--surface", sf]);
       } catch { /* unreadable — after stays "", readInputBoxRaw → null → inconclusive → defer */ }
       const after = readInputBoxRaw(afterScreen);
+      const rawAfter = readInputBoxRaw(afterScreen, { trim: false });
 
       const liveness = classifyDraftLiveness(before, after);
       if (liveness === "real-draft") {
@@ -633,8 +643,17 @@ export function createCmuxDriver(): RuntimeDriver {
         // Ghost positively dismissed to empty — safe to deliver.
         await deliver(); return;
       }
-      // 'inconclusive' (ghost-invariant, trailing-space, timing race, etc.)
-      // → DEFER: protect the human's in-progress text, delay the bot (#258).
+      // 'inconclusive': could be ghost-invariant (true no-op) or trailing-space
+      // draft (backspace removed the space but trim masked it). Distinguish by
+      // comparing the UNTRIMMED raw content: if the box actually changed, the
+      // backspace consumed a real character — restore it before deferring (#258).
+      if (rawBefore !== null && rawAfter !== null && rawBefore !== rawAfter) {
+        const segs = [...new Intl.Segmenter().segment(rawBefore)];
+        const lastGrapheme =
+          segs.length > 0 ? segs[segs.length - 1].segment : rawBefore.slice(-1);
+        await cmux(["send", "--workspace", ws, "--surface", sf, lastGrapheme]);
+      }
+      // → DEFER either way: protect the human's in-progress text, delay the bot.
       throw new DeferDelivery(draft);
     },
 

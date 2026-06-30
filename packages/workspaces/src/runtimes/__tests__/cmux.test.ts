@@ -757,6 +757,34 @@ describe("sendToSurface draft-preservation", () => {
     expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("persistent suggestion")))).toBe(false);
     // Crew message NOT delivered — deferred to protect any possible real draft
     expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(false);
+    // True no-op: backspace didn't change the box → no restore send at all (#258)
+    expect(calls.filter((a) => a[0] === "send")).toHaveLength(0);
+  });
+
+  // #258 trailing-space residual: probe removes the trailing space (which readInputBoxRaw
+  // trimmed, so before===after in the trimmed view → inconclusive). The RAW (untrimmed)
+  // comparison detects the change and restores the space before deferring — the user's
+  // draft is left intact as "hello ", not mutated to "hello".
+  it("probe: trailing-space draft (inconclusive) → defers AND restores the space (draft preserved)", async () => {
+    let rawBox = "hello "; // trailing space — readInputBoxRaw trims it away → before="hello"
+    execFileMock.mockImplementation((_bin: string, args: string[]) => {
+      if (args.includes("read-screen")) return makeTestScreen(`❯ ${rawBox}`);
+      if (args.includes("send-key") && args.includes("backspace")) {
+        rawBox = rawBox.slice(0, -1); // backspace removes the trailing space from terminal
+        return "";
+      }
+      return "";
+    });
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true }),
+    ).rejects.toBeInstanceOf(DeferDelivery);
+    const calls = execFileMock.mock.calls.map(argvOf);
+    // Crew message NOT delivered
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(false);
+    // The trailing space is restored — exactly one send(), and it sends " "
+    const sends = calls.filter((a) => a[0] === "send");
+    expect(sends).toHaveLength(1);
+    expect(sends[0][sends[0].length - 1]).toBe(" ");
   });
 
   it("non-probe call with a draft present defers WITHOUT any keystroke (hot path unchanged — never races typing)", async () => {
