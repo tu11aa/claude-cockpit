@@ -708,6 +708,27 @@ describe("sendToSurface draft-preservation", () => {
     expect(sends[0][sends[0].length - 1]).toBe("d");
   });
 
+  // #258 emoji fix: trailing emoji (surrogate pair) is correctly classified as
+  // real-draft and the FULL grapheme (not a lone broken surrogate) is restored.
+  it("probe: real draft ending in emoji (😀, surrogate pair) → defers and restores the full grapheme, never re-pastes draft", async () => {
+    const DRAFT = "hello 😀";
+    // Terminal backspace removes the 😀 grapheme; readInputBoxRaw trims trailing
+    // space → box shows "hello" → probeMock simulates this transformation.
+    probeMock(DRAFT, () => "hello");
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true }),
+    ).rejects.toBeInstanceOf(DeferDelivery);
+    const calls = execFileMock.mock.calls.map(argvOf);
+    // Full draft must NEVER be re-pasted
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes(DRAFT)))).toBe(false);
+    // Crew message NOT delivered
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(false);
+    // The restored char must be the full emoji grapheme, not a broken surrogate
+    const sends = calls.filter((a) => a[0] === "send");
+    expect(sends).toHaveLength(1);
+    expect(sends[0][sends[0].length - 1]).toBe("😀");
+  });
+
   it("probe: ghost that DISMISSES to empty under backspace → delivers message+Enter, NEVER re-sends the ghost text (#302 materialization regression)", async () => {
     const GHOST = "wait for both crews to finish";
     probeMock(GHOST, () => ""); // verified live: the #294 queue ghost dismisses to empty
@@ -720,13 +741,22 @@ describe("sendToSurface draft-preservation", () => {
     expect(calls.some((a) => a.includes("send-key") && a.includes("Enter"))).toBe(true);
   });
 
-  it("probe: ghost INVARIANT under backspace (stays identical) → delivers, never re-sends the ghost", async () => {
+  // #258 fix: ghost-invariant (after===before) is now INCONCLUSIVE — it is
+  // indistinguishable from a real draft whose trailing space was trimmed away
+  // by readInputBoxRaw. Bias: protect the human, delay the bot. The ghost text
+  // is still never re-pasted (no materialization). Crew message deferred until
+  // a later probe sees after==="" (ghost dismissed) or a grapheme-aware match.
+  it("probe: ghost INVARIANT under backspace (stays identical) → defers (inconclusive — indistinguishable from trailing-space real draft, #258)", async () => {
     const GHOST = "some persistent suggestion";
     probeMock(GHOST, (s) => s); // invariant: backspace is a no-op on non-buffer ghost
-    await driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true });
+    await expect(
+      driver.sendToSurface({ workspaceId: "workspace:3", surfaceId: "surface:8" }, "crew done", { probe: true }),
+    ).rejects.toBeInstanceOf(DeferDelivery);
     const calls = execFileMock.mock.calls.map(argvOf);
+    // Ghost text is never re-pasted (materialization guard still holds)
     expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("persistent suggestion")))).toBe(false);
-    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(true);
+    // Crew message NOT delivered — deferred to protect any possible real draft
+    expect(calls.some((a) => a[0] === "send" && a.some((s: string) => s.includes("crew done")))).toBe(false);
   });
 
   it("non-probe call with a draft present defers WITHOUT any keystroke (hot path unchanged — never races typing)", async () => {
