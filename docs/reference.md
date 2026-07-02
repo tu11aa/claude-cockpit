@@ -62,7 +62,9 @@ guided first run — come back here when you need the details.
 | `squadrant retro` | Generate a retro (weekly/sprint summary) from daily logs and git (zero tokens) |
 | `squadrant config check` | Detect config drift vs the current default schema |
 | `squadrant heal [--dry-run\|daemon]` | Targeted, idempotent remediation for squadrant components (daemon, health) |
-| `squadrant group dispatch …` | Cross-project intra-group operations (dispatch a task to a sibling project) |
+| `squadrant ping <project> "<msg>"` | Fire-and-forget: deliver a message into any registered project's captain pane (no tracked task, no report-back) |
+| `squadrant dispatch <project> "<task>"` | Dispatch a tracked task to any registered project; reports back to the origin on settle. Same group additionally auto-accepts and boots the target captain if down — see [cross-project ping & dispatch](specs/2026-07-02-cross-project-ping-dispatch-design.md) |
+| `squadrant group dispatch …` | **Deprecated alias** for `squadrant dispatch` — kept working, prints a deprecation note |
 | `squadrant cmux …` | cmux integration helpers |
 | `squadrant feedback` | Open opt-in feedback issue |
 
